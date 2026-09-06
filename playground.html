@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Live Extension - Test Playground</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #131b2e;
+      --card-border: rgba(255, 255, 255, 0.08);
+      --primary: #6366f1;
+      --accent: #38bdf8;
+      --success: #10b981;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --chip-bg: #1e293b;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: var(--font);
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 30px 20px 80px;
+    }
+
+    .playground-container {
+      max-width: 880px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    header {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(56, 189, 248, 0.1) 100%);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 16px;
+      padding: 24px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .header-text h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .header-text p {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .instructions-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px dashed var(--card-border);
+      border-radius: 12px;
+      padding: 14px 20px;
+      font-size: 13px;
+      color: #cbd5e1;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Question Cards */
+    .question-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+      position: relative;
+      transition: border-color 0.2s;
+    }
+
+    .question-card:focus-within {
+      border-color: rgba(99, 102, 241, 0.4);
+    }
+
+    .card-badge-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .q-type-pill {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 3px 10px;
+      border-radius: 9999px;
+      background: rgba(99, 102, 241, 0.15);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+
+    .q-number {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .question-title {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 18px;
+      color: #fff;
+    }
+
+    /* 1. MCQ Options */
+    .options-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .mcq-option {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .mcq-option:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .mcq-option input[type="radio"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--primary);
+      cursor: pointer;
+    }
+
+    .mcq-option span {
+      font-size: 14.5px;
+    }
+
+    /* 2. Choose Correct Word */
+    .fill-sentence {
+      font-size: 16px;
+      line-height: 2.2;
+      background: rgba(0, 0, 0, 0.2);
+      padding: 16px 20px;
+      border-radius: 12px;
+      border: 1px solid var(--card-border);
+    }
+
+    .test-select {
+      background: #1e293b;
+      border: 1px solid rgba(99, 102, 241, 0.5);
+      color: #38bdf8;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 15px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    /* 3. Rearrange Sentence */
+    .rearrange-workspace {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .assembled-area {
+      min-height: 52px;
+      background: rgba(0, 0, 0, 0.25);
+      border: 2px dashed rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      padding: 8px 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .assembled-placeholder {
+      font-size: 13px;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    .chips-bank {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 10px;
+    }
+
+    .word-chip {
+      background: var(--chip-bg);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #f1f5f9;
+      cursor: pointer;
+      user-select: none;
+      transition: transform 0.1s, background 0.15s, border-color 0.15s;
+    }
+
+    .word-chip:hover {
+      background: rgba(99, 102, 241, 0.25);
+      border-color: var(--primary);
+      transform: translateY(-2px);
+    }
+
+    .word-chip.used {
+      opacity: 0.3;
+      pointer-events: none;
+    }
+
+    /* 4. Writing Area */
+    .writing-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .test-textarea {
+      width: 100%;
+      min-height: 120px;
+      background: #0d1322;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 14px;
+      color: #fff;
+      font-size: 14.5px;
+      line-height: 1.6;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .test-textarea:focus {
+      border-color: var(--primary);
+    }
+
+    .textarea-counter {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-align: right;
+    }
+
+    /* 5. Speaking Questions */
+    .speaking-box {
+      background: rgba(56, 189, 248, 0.05);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 14px;
+    }
+
+    .speaking-passage {
+      font-size: 16px;
+      font-style: italic;
+      color: #e2e8f0;
+      line-height: 1.6;
+    }
+
+    .speaking-dropdown-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      background: rgba(0, 0, 0, 0.2);
+      padding: 10px 14px;
+      border-radius: 8px;
+    }
+
+    .speaking-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn-mic {
+      background: #ef4444;
+      border: none;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mic-status {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* Grading Footer */
+    .submit-bar {
+      display: flex;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .btn-grade {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      color: #fff;
+      border: none;
+      padding: 14px 32px;
+      font-size: 16px;
+      font-weight: 700;
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(16, 185, 129, 0.4);
+      transition: transform 0.15s;
+    }
+
+    .btn-grade:hover {
+      transform: translateY(-2px);
+    }
+
+    #grade-results {
+      display: none;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 16px;
+    }
+
+    #grade-results h3 {
+      color: #34d399;
+      margin-bottom: 10px;
+    }
+
+    .result-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="playground-container">
+    <!-- Header -->
+    <header>
+      <div class="header-text">
+        <h1>Gemini Live Question Solver - Interactive Playground</h1>
+        <p>A live simulator testing all 5 question types supported by the extension.</p>
+      </div>
+    </header>
+
+    <div class="instructions-card">
+      <span style="font-size: 20px;">💡</span>
+      <span>
+        Click <strong>"Solve Current (Alt+S)"</strong> on the floating Gemini HUD widget, or select any question card to test automated resolution and teleprompter display.
+      </span>
+    </div>
+
+    <!-- Question 1: MCQ -->
+    <div class="question-card" id="card-q1">
+      <div class="card-badge-row">
+        <span class="q-type-pill">Type 1: Multiple Choice (MCQ)</span>
+        <span class="q-number">Question 1 of 5</span>
+      </div>
+      <h2 class="question-title">Which of the following is the primary greenhouse gas emitted through human activities such as the combustion of fossil fuels?</h2>
+      <div class="options-grid" role="radiogroup">
+        <label class="mcq-option" for="mcq-opt-1">
+          <input type="radio" name="q1" id="mcq-opt-1" value="Helium (He)">
+          <span>Helium (He)</span>
+        </label>
+        <label class="mcq-option" for="mcq-opt-2">
+          <input type="radio" name="q1" id="mcq-opt-2" value="Carbon Dioxide (CO2)">
+          <span>Carbon Dioxide (CO₂)</span>
+        </label>
+        <label class="mcq-option" for="mcq-opt-3">
+          <input type="radio" name="q1" id="mcq-opt-3" value="Argon (Ar)">
+          <span>Argon (Ar)</span>
+        </label>
+        <label class="mcq-option" for="mcq-opt-4">
+          <input type="radio" name="q1" id="mcq-opt-4" value="Neon (Ne)">
+          <span>Neon (Ne)</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Question 2: Choose the Correct Word -->
+    <div class="question-card" id="card-q2">
+      <div class="card-badge-row">
+        <span class="q-type-pill">Type 2: Choose the Correct Word</span>
+        <span class="q-number">Question 2 of 5</span>
+      </div>
+      <h2 class="question-title">Select the grammatically correct words from the dropdown menus to complete the scientific report.</h2>
+      <div class="fill-sentence">
+        The research team succeeded 
+        <select id="select-word-1" class="test-select" name="prep1">
+          <option value="">[choose word]</option>
+          <option value="at">at</option>
+          <option value="in">in</option>
+          <option value="on">on</option>
+        </select>
+        synthesizing the biodegradable polymer after experimenting tirelessly 
+        <select id="select-word-2" class="test-select" name="prep2">
+          <option value="">[choose word]</option>
+          <option value="for">for</option>
+          <option value="since">since</option>
+          <option value="during">during</option>
+        </select>
+        over eighteen consecutive months.
+      </div>
+    </div>
+
+    <!-- Question 3: Rearrange the Sentence -->
+    <div class="question-card" id="card-q3">
+      <div class="card-badge-row">
+        <span class="q-type-pill">Type 3: Rearrange the Sentence</span>
+        <span class="q-number">Question 3 of 5</span>
+      </div>
+      <h2 class="question-title">Reorder the scrambled word chips to form a coherent, grammatically correct sentence:</h2>
+      <div class="rearrange-workspace">
+        <div id="assembled-sentence" class="assembled-area">
+          <span class="assembled-placeholder">Click words below to assemble here...</span>
+        </div>
+        <div class="chips-bank" id="chips-bank">
+          <div class="word-chip" data-word="rapidly">rapidly</div>
+          <div class="word-chip" data-word="Artificial">Artificial</div>
+          <div class="word-chip" data-word="technology">technology</div>
+          <div class="word-chip" data-word="modern">modern</div>
+          <div class="word-chip" data-word="transforming">transforming</div>
+          <div class="word-chip" data-word="is">is</div>
+          <div class="word-chip" data-word="intelligence">intelligence</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Question 4: Writing Question -->
+    <div class="question-card writing-question" id="card-q4">
+      <div class="card-badge-row">
+        <span class="q-type-pill">Type 4: Writing Question</span>
+        <span class="q-number">Question 4 of 5</span>
+      </div>
+      <h2 class="question-title">Explain how artificial intelligence and machine learning are revolutionizing healthcare and medical diagnostics (approx. 40-60 words).</h2>
+      <div class="writing-container">
+        <textarea id="writing-input" class="test-textarea" placeholder="Type your response here..."></textarea>
+        <div class="textarea-counter"><span id="word-count">0</span> words</div>
+      </div>
+    </div>
+
+    <!-- Question 5: Speaking Question with Dropdown -->
+    <div class="question-card speaking-question" id="card-q5">
+      <div class="card-badge-row">
+        <span class="q-type-pill">Type 5: Speaking Question with Dropdown</span>
+        <span class="q-number">Question 5 of 5</span>
+      </div>
+      <h2 class="question-title">Speaking Assessment: Select the optimal communication tone from the dropdown, then speak your response aloud.</h2>
+
+      <!-- Dropdown that must be selected first as specified in prompt -->
+      <div class="speaking-dropdown-row">
+        <label for="speaking-tone-select"><strong>Step 1: Choose Presentation Tone:</strong></label>
+        <select id="speaking-tone-select" class="test-select" name="presentation_tone">
+          <option value="">[Select Tone]</option>
+          <option value="hesitant">Hesitant & Unsure</option>
+          <option value="persuasive">Inspiring & Persuasive</option>
+          <option value="casual">Casual & Slang</option>
+        </select>
+      </div>
+
+      <!-- Speaking Prompt -->
+      <div class="speaking-box">
+        <p class="speaking-passage">
+          "Step 2: Deliver an articulate 30-second speech convincing community leaders to invest in solar energy infrastructure to promote environmental sustainability."
+        </p>
+      </div>
+
+      <div class="speaking-controls">
+        <button class="btn-mic record-btn" id="record-btn">
+          <span>🎙️</span>
+          <span>Record Audio</span>
+        </button>
+        <span class="mic-status" id="record-status">Awaiting response</span>
+      </div>
+    </div>
+
+    <!-- Submit & Grade Answers -->
+    <div class="submit-bar">
+      <button id="btn-grade-answers" class="btn-grade">Check & Grade Answers</button>
+    </div>
+
+    <!-- Grade Results Container -->
+    <div id="grade-results">
+      <h3>Grading Report</h3>
+      <div id="grade-list"></div>
+    </div>
+  </div>
+
+  <script>
+    // Word count handler for textarea
+    const writingInput = document.getElementById("writing-input");
+    const wordCountSpan = document.getElementById("word-count");
+    writingInput.addEventListener("input", () => {
+      const words = writingInput.value.trim().split(/\s+/).filter(Boolean).length;
+      wordCountSpan.innerText = words;
+    });
+
+    // Chip click assembly for Rearrange Question
+    const chipsBank = document.getElementById("chips-bank");
+    const assembledArea = document.getElementById("assembled-sentence");
+    const placeholder = assembledArea.querySelector(".assembled-placeholder");
+
+    chipsBank.addEventListener("click", (e) => {
+      const chip = e.target.closest(".word-chip");
+      if (!chip || chip.classList.contains("used")) return;
+
+      if (placeholder) placeholder.style.display = "none";
+
+      chip.classList.add("used");
+      const clone = document.createElement("div");
+      clone.className = "word-chip";
+      clone.innerText = chip.innerText;
+      clone.setAttribute("data-source-id", chip.getAttribute("data-word"));
+
+      clone.addEventListener("click", () => {
+        chip.classList.remove("used");
+        clone.remove();
+        if (assembledArea.querySelectorAll(".word-chip").length === 0 && placeholder) {
+          placeholder.style.display = "inline";
+        }
+      });
+
+      assembledArea.appendChild(clone);
+    });
+
+    // Simulated record button for speaking question
+    const recordBtn = document.getElementById("record-btn");
+    const recordStatus = document.getElementById("record-status");
+    let isRecording = false;
+    recordBtn.addEventListener("click", () => {
+      isRecording = !isRecording;
+      recordBtn.style.background = isRecording ? "#10b981" : "#ef4444";
+      recordStatus.innerText = isRecording ? "Recording... (Listening)" : "Completed";
+    });
+
+    // Grade validation
+    document.getElementById("btn-grade-answers").addEventListener("click", () => {
+      const results = [];
+      
+      // Q1: MCQ check (Correct: Carbon Dioxide)
+      const q1Selected = document.querySelector('input[name="q1"]:checked');
+      const q1Pass = q1Selected && q1Selected.value.includes("Carbon Dioxide");
+      results.push({
+        title: "1. MCQ (Greenhouse Gas)",
+        passed: q1Pass,
+        detail: q1Selected ? `Selected: ${q1Selected.value}` : "No option selected"
+      });
+
+      // Q2: Word Choice (Correct: "in", "for")
+      const sel1 = document.getElementById("select-word-1").value;
+      const sel2 = document.getElementById("select-word-2").value;
+      const q2Pass = sel1 === "in" && sel2 === "for";
+      results.push({
+        title: "2. Choose Correct Word",
+        passed: q2Pass,
+        detail: `Selected: "${sel1}" and "${sel2}" (Expected: "in" and "for")`
+      });
+
+      // Q3: Rearrange (Correct: "Artificial intelligence is transforming modern technology rapidly.")
+      const assembledChips = Array.from(assembledArea.querySelectorAll(".word-chip")).map(c => c.innerText.trim());
+      const expectedArr = ["Artificial", "intelligence", "is", "transforming", "modern", "technology", "rapidly"];
+      const q3Pass = assembledChips.join(" ").toLowerCase() === expectedArr.join(" ").toLowerCase();
+      results.push({
+        title: "3. Rearrange Sentence",
+        passed: q3Pass,
+        detail: assembledChips.length > 0 ? `Sentence: "${assembledChips.join(" ")}"` : "No words assembled"
+      });
+
+      // Q4: Writing (Check if populated with >= 20 words)
+      const textVal = writingInput.value.trim();
+      const wordCount = textVal.split(/\s+/).filter(Boolean).length;
+      const q4Pass = wordCount >= 20;
+      results.push({
+        title: "4. Writing Essay",
+        passed: q4Pass,
+        detail: `Word Count: ${wordCount} words ${q4Pass ? '(Articulate answer present)' : '(Needs >= 20 words)'}`
+      });
+
+      // Q5: Speaking with Dropdown (Correct dropdown: "persuasive")
+      const toneSel = document.getElementById("speaking-tone-select").value;
+      const q5Pass = toneSel === "persuasive";
+      results.push({
+        title: "5. Speaking Dropdown Selection",
+        passed: q5Pass,
+        detail: `Tone Selected: "${toneSel}" (Expected: "persuasive")`
+      });
+
+      // Render Grade Report
+      const gradeList = document.getElementById("grade-list");
+      const gradeContainer = document.getElementById("grade-results");
+      gradeList.innerHTML = results.map(r => `
+        <div class="result-item">
+          <span>${r.title}</span>
+          <span style="color: ${r.passed ? '#34d399' : '#f87171'}; font-weight: 600;">
+            ${r.passed ? '✓ PASSED' : '✗ FAILED'} (${r.detail})
+          </span>
+        </div>
+      `).join("");
+      gradeContainer.style.display = "block";
+      gradeContainer.scrollIntoView({ behavior: "smooth" });
+    });
+  </script>
+</body>
+</html>

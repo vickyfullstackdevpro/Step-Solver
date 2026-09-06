@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini Live Solver Settings</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="popup-header">
+      <div class="brand">
+        <div class="logo-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="url(#gemini-pop-grad)"/>
+            <defs>
+              <linearGradient id="gemini-pop-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#818cf8"/>
+                <stop offset="100%" stop-color="#38bdf8"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>Gemini Live</h1>
+          <span class="version-tag">Exam & Quiz Solver v1.0</span>
+        </div>
+      </div>
+      <div id="status-badge" class="status-badge disconnected">Key Missing</div>
+    </header>
+
+    <!-- Main Settings Form -->
+    <main class="popup-content">
+      <!-- Master ON/OFF Switch Card -->
+      <section class="settings-card master-power-card">
+        <div class="master-power-row">
+          <div class="master-power-info">
+            <span class="master-power-title">Extension Power</span>
+            <span id="master-power-status" class="master-power-status active">Active & Ready</span>
+          </div>
+          <label class="master-switch">
+            <input type="checkbox" id="master-power-toggle" checked>
+            <span class="master-slider"></span>
+          </label>
+        </div>
+      </section>
+
+      <!-- API Key Pool Card (Max 10 with Auto-Failover) -->
+      <section class="settings-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <label for="new-key-input">API Key Pool</label>
+            <span id="key-count-badge" class="key-count-badge">0 / 10</span>
+          </div>
+          <a href="https://aistudio.google.com/app/apikey" target="_blank" class="link-helper">Get Free Key ↗</a>
+        </div>
+
+        <div class="add-key-row">
+          <div class="input-with-action">
+            <input type="password" id="new-key-input" placeholder="Paste Gemini API Key (AIzaSy...)" spellcheck="false" autocomplete="off">
+            <button id="toggle-key-visibility" class="icon-action-btn" title="Show / Hide Key">👁️</button>
+          </div>
+          <button id="btn-add-key" class="btn-primary">
+            <span id="btn-add-text">+ Add Key</span>
+          </button>
+        </div>
+        <div id="api-status-msg" class="api-feedback"></div>
+
+        <!-- Keys List Container -->
+        <div id="keys-list" class="keys-list">
+          <!-- Populated dynamically by popup.js -->
+        </div>
+
+        <div class="failover-notice">
+          <span class="failover-icon">⚡</span>
+          <span><strong>Auto-Failover Active:</strong> If one key's token limit exhausts, the solver seamlessly switches to the next available key (up to 10 keys).</span>
+        </div>
+      </section>
+
+      <!-- Preferences & Auto Model -->
+      <section class="settings-card">
+        <div class="model-auto-indicator">
+          <div class="model-indicator-header">
+            <span class="indicator-title">✨ AI Model</span>
+            <span id="active-model-name" class="model-pill">Auto-Selected</span>
+          </div>
+          <span class="model-indicator-sub">Automatically determines the optimal Flash model for the active key.</span>
+        </div>
+
+        <div class="form-group" style="margin-top: 6px;">
+          <div class="label-row">
+            <label for="speed-slider">Interaction Pacing</label>
+            <span id="speed-value" class="value-display">250 ms</span>
+          </div>
+          <input type="range" id="speed-slider" min="0" max="800" step="50" value="250" class="form-range">
+          <span class="range-subtext">Adds natural delay between clicks/keystrokes</span>
+        </div>
+      </section>
+
+      <!-- Supported Question Types Info -->
+      <section class="settings-card">
+        <span class="section-title">Supported Question Types</span>
+        <div class="types-grid">
+          <div class="type-item">
+            <span class="type-icon">🔘</span>
+            <div class="type-info">
+              <strong>MCQ</strong>
+              <small>Auto-clicks correct options</small>
+            </div>
+          </div>
+          <div class="type-item">
+            <span class="type-icon">🔤</span>
+            <div class="type-info">
+              <strong>Word Choice</strong>
+              <small>Auto-selects dropdowns & blanks</small>
+            </div>
+          </div>
+          <div class="type-item">
+            <span class="type-icon">🔀</span>
+            <div class="type-info">
+              <strong>Rearrange</strong>
+              <small>Orders sentence word chips</small>
+            </div>
+          </div>
+          <div class="type-item">
+            <span class="type-icon">✍️</span>
+            <div class="type-info">
+              <strong>Writing</strong>
+              <small>Auto-types essay responses</small>
+            </div>
+          </div>
+          <div class="type-item highlight">
+            <span class="type-icon">🎙️</span>
+            <div class="type-info">
+              <strong>Speaking + Dropdown</strong>
+              <small>Auto-picks dropdown & displays teleprompter</small>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Actions & Playground -->
+      <section class="footer-actions">
+        <button id="btn-open-playground" class="btn-secondary">
+          <span>🚀 Open Test Playground</span>
+        </button>
+        <div class="keyboard-hints">
+          <span>Shortcut: <strong>Alt + S</strong> (Solve) • <strong>Alt + H</strong> (HUD)</span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
