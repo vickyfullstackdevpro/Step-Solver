@@ -393,8 +393,9 @@
   function isNavOrSystem(el) {
     if (!el || el.closest("#gemini-live-host")) return true;
 
-    // Strictly exclude headers, navbars, progress indicators, breadcrumbs, footers
-    if (el.closest("header, nav, footer, aside, [class*='header' i], [class*='top-bar' i], [class*='topbar' i], [class*='navbar' i], [class*='progress' i], [class*='breadcrumb' i]")) {
+    // Exclude top-level page headers, navbars, progress indicators, breadcrumbs, footers
+    // NOTE: Do NOT use generic [class*='header'] as that improperly excludes .question-header and .card-header
+    if (el.closest("header, nav, footer, aside, [class*='top-bar' i], [class*='topbar' i], [class*='navbar' i], [class*='site-header' i], [class*='page-header' i], [class*='app-header' i], [class*='global-header' i], [class*='progress' i], [class*='breadcrumb' i]")) {
       return true;
     }
 
@@ -423,6 +424,20 @@
       currentNum = parseInt(progressMatch[1], 10);
       totalNum = parseInt(progressMatch[2], 10);
     }
+
+    // Also look for visible numbered heading like "1. Aarav...", "4. Which of the..."
+    if (!currentNum) {
+      const headingEl = Array.from(document.querySelectorAll("h1, h2, h3, h4, p, div, span")).find(el => {
+        if (!isElementVisible(el) || isNavOrSystem(el)) return false;
+        const t = el.innerText.trim();
+        return /^\d+[\.\)]\s+[A-Za-z]/.test(t) || /^question\s*\d+/i.test(t);
+      });
+      if (headingEl) {
+        const match = headingEl.innerText.trim().match(/^(\d+)[\.\)]/i) || headingEl.innerText.trim().match(/^question\s*(\d+)/i);
+        if (match) currentNum = parseInt(match[1], 10);
+      }
+    }
+
     return { currentNum, totalNum };
   }
 
@@ -432,12 +447,12 @@
 
     // 1. If active element is an input/choice in a question, use its container
     const focused = document.activeElement;
-    if (focused && focused !== document.body && !focused.closest("#gemini-live-host, header, nav, [class*='header' i], [class*='top-bar' i]")) {
-      const container = focused.closest(".question, .question-card, .quiz-question, .exercise, [role='region'], fieldset, form, .test-container");
-      if (container) return container;
+    if (focused && focused !== document.body && !focused.closest("#gemini-live-host, header, nav, [class*='top-bar' i]")) {
+      const container = focused.closest(".question, .question-card, .quiz-question, .exercise, [role='region'], fieldset, form");
+      if (container && isElementVisible(container)) return container;
     }
 
-    // 2. Target the specific question header matching currentNum (e.g. "2. Which of...")
+    // 2. Target the specific question header matching currentNum (e.g. "4. Which of...")
     let targetHeader = null;
     if (currentNum) {
       const targetRegex = new RegExp(`^\\s*${currentNum}[\\.\\)]\\s+`, "i");
@@ -446,26 +461,24 @@
       const candidates = Array.from(document.querySelectorAll("h1, h2, h3, h4, p, div, span")).filter(el => {
         if (!isElementVisible(el) || isNavOrSystem(el)) return false;
         const t = el.innerText.trim();
-        return targetRegex.test(t) || altRegex.test(t);
+        return (targetRegex.test(t) || altRegex.test(t)) && t.length > 5;
       });
 
       if (candidates.length > 0) {
-        // Pick the leaf candidate with the shortest text
         candidates.sort((a, b) => a.innerText.trim().length - b.innerText.trim().length);
         targetHeader = candidates[0];
       }
     }
 
-    // 3. Fallback: Find visible numbered headers and pick the one in current viewport
+    // 3. Fallback: Find visible numbered headers in viewport
     if (!targetHeader) {
       const allHeaders = Array.from(document.querySelectorAll("h1, h2, h3, h4, p, div, span")).filter(el => {
         if (!isElementVisible(el) || isNavOrSystem(el)) return false;
         const t = el.innerText.trim();
-        return (/^\d+[\.\)]\s+[A-Z]/i.test(t) || /^question\s*\d+/i.test(t)) && t.length > 10;
+        return (/^\d+[\.\)]\s+[A-Za-z]/i.test(t) || /^question\s*\d+/i.test(t)) && t.length > 10;
       });
 
       if (allHeaders.length > 0) {
-        // Prefer header closest to the upper viewport
         allHeaders.sort((a, b) => {
           const aTop = a.getBoundingClientRect().top;
           const bTop = b.getBoundingClientRect().top;
@@ -477,18 +490,20 @@
       }
     }
 
-    // 4. Walk up from targetHeader to find its enclosing question container
+    // 4. Walk up from targetHeader to find enclosing question container that encloses prompt AND options/inputs
     if (targetHeader) {
       let current = targetHeader;
-      let bestContainer = targetHeader;
+      let bestContainer = null;
       while (current && current.parentElement && current.parentElement !== document.body) {
         const p = current.parentElement;
         if (isNavOrSystem(p)) break;
 
-        const hasQuestionControls = p.querySelector(
+        const hasOptionsOrControls = p.querySelector(
           "input, select, textarea, button, [class*='option' i], [class*='chip' i], [class*='choice' i]"
         );
-        if (hasQuestionControls) {
+        const hasSubstantialContent = p.innerText.trim().length > targetHeader.innerText.trim().length + 20;
+
+        if (hasOptionsOrControls || hasSubstantialContent) {
           bestContainer = p;
         }
 
@@ -507,19 +522,17 @@
       if (bestContainer) return bestContainer;
     }
 
-    // 5. Check candidate selectors
+    // 5. Look for main single-question content wrapper
     const candidateSelectors = [
+      "main", "#content", ".test-container", ".question-container",
       ".question.active", ".active-question", ".current-question",
-      ".question-card", ".question", ".quiz-card", ".exercise",
-      ".test-container", "main", "#content"
+      ".question-card", ".question", ".quiz-card", ".exercise"
     ];
 
     for (const selector of candidateSelectors) {
-      const matches = document.querySelectorAll(selector);
-      for (const el of matches) {
-        if (isElementVisible(el) && !el.closest("#gemini-live-host, header, nav, [class*='header' i], [class*='top-bar' i]")) {
-          return el;
-        }
+      const el = document.querySelector(selector);
+      if (el && isElementVisible(el) && !el.closest("#gemini-live-host, header, nav, [class*='top-bar' i]")) {
+        return el;
       }
     }
 
@@ -528,25 +541,26 @@
 
   function isElementVisible(el) {
     if (!el || !(el instanceof Element)) return false;
+    // Check if element or any ancestor is explicitly hidden via inline style or CSS classes
+    if (el.closest("[style*='display: none'], [style*='display:none'], [hidden], .hidden, .hide, .d-none, .ng-hide, [aria-hidden='true']")) {
+      return false;
+    }
     const style = window.getComputedStyle(el);
     if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
       return false;
     }
     const rect = el.getBoundingClientRect();
     return (
-      rect.width > 0 ||
-      rect.height > 0 ||
-      el.offsetWidth > 0 ||
-      el.offsetHeight > 0 ||
-      el.getClientRects().length > 0
+      (rect.width > 0 && rect.height > 0) ||
+      (el.offsetWidth > 0 && el.offsetHeight > 0)
     );
   }
 
-  // Check if current question is a Sentence / Phrase Rearrangement question (Scoped to current question)
+  // Check if current question is a Sentence / Phrase Rearrangement question (Scoped strictly to current container)
   function checkIsRearrangeQuestion(container) {
     if (!container) return false;
     const pageText = (container.innerText || "").toLowerCase();
-    if (
+    const hasRearrangeKeywords = (
       pageText.includes("rearrange the phrases") ||
       pageText.includes("rearrange the words") ||
       pageText.includes("rearrange words") ||
@@ -557,18 +571,15 @@
       pageText.includes("arrange sentences") ||
       pageText.includes("arrange the words") ||
       pageText.includes("arrange the phrases") ||
-      pageText.includes("form a logical sentence") ||
-      pageText.includes("form a sentence") ||
-      pageText.includes("correct sequence") ||
-      pageText.includes("logical sequence") ||
-      pageText.includes("proper sequence")
-    ) {
-      return true;
-    }
+      pageText.includes("form a logical sentence")
+    );
 
-    const hasResetBtn = Array.from(container.querySelectorAll("button, a, input[type='button'], div[role='button']"))
-      .some(b => !isNavOrSystem(b) && (b.innerText || b.value || "").trim().toLowerCase().startsWith("reset"));
-    if (hasResetBtn && (pageText.includes("“") || pageText.includes("\"") || pageText.includes("sentence") || pageText.includes("phrase"))) {
+    // Reset button check: MUST be visible in the current container
+    const hasVisibleResetBtn = Array.from(container.querySelectorAll("button, a, input[type='button'], div[role='button']"))
+      .some(b => isElementVisible(b) && !isNavOrSystem(b) && (b.innerText || b.value || "").trim().toLowerCase().startsWith("reset"));
+
+    if (hasRearrangeKeywords) return true;
+    if (hasVisibleResetBtn && (pageText.includes("“") || pageText.includes("\"") || pageText.includes("sentence") || pageText.includes("phrase"))) {
       return true;
     }
 
@@ -605,7 +616,7 @@
     }
 
     // Strategy 0: Find instruction anchor within the current question scope
-    const allLabels = Array.from(scope.querySelectorAll("*")).filter(el => !isNavOrSystem(el));
+    const allLabels = Array.from(scope.querySelectorAll("*")).filter(el => isElementVisible(el) && !isNavOrSystem(el));
     const matchingAnchors = allLabels.filter(el => {
       const t = el.innerText.trim().toLowerCase();
       return (
@@ -620,7 +631,7 @@
       matchingAnchors.sort((a, b) => a.innerText.trim().length - b.innerText.trim().length);
       const anchor = matchingAnchors[0];
 
-      const allElements = Array.from(scope.querySelectorAll("*"));
+      const allElements = Array.from(scope.querySelectorAll("*")).filter(isElementVisible);
       const anchorIdx = allElements.indexOf(anchor);
 
       const resetBtn = allElements.find(el => {
@@ -705,10 +716,11 @@
   }
 
   // Dedicated multi-strategy MCQ option finder
-  // Dedicated multi-strategy MCQ option finder
   function findMCQOptions(container) {
+    const scope = (container && container !== document.body) ? container : document.body;
+
     // CRITICAL: If this is a sentence rearrangement question, DO NOT hijack chips as MCQ options!
-    if (checkIsRearrangeQuestion(container)) {
+    if (checkIsRearrangeQuestion(scope)) {
       return [];
     }
 
@@ -716,7 +728,7 @@
     const seenElements = new Set();
 
     function addOption(el, text) {
-      if (!el || seenElements.has(el) || isNavOrSystem(el)) return;
+      if (!el || seenElements.has(el) || !isElementVisible(el) || isNavOrSystem(el)) return;
       const cleaned = (text || el.innerText || "").trim();
       if (!cleaned || cleaned.length < 2) return;
       // Do not add navigation / submit buttons as options
@@ -732,9 +744,10 @@
       });
     }
 
-    // Strategy 1 (Highest Confidence): Contextual phrase anchor ("Select the best answer", "Choose the correct", etc.)
-    const allElements = Array.from(container.querySelectorAll("*")).filter(el => !isNavOrSystem(el));
-    const matchingAnchors = allElements.filter(el => {
+    // Strategy 1 (Highest Confidence for StepTest & standard exams):
+    // Find phrase anchor ("Select the best answer", "Choose the correct", etc.) and scan candidate option cards up to Submit
+    const allVisible = Array.from(scope.querySelectorAll("*")).filter(el => isElementVisible(el) && !isNavOrSystem(el));
+    const matchingAnchors = allVisible.filter(el => {
       const txt = (el.innerText || "").trim().toLowerCase();
       return (
         txt.includes("select the best answer") ||
@@ -746,47 +759,32 @@
     });
 
     if (matchingAnchors.length > 0) {
-      // Pick the leaf/most specific anchor element (shortest text)
       matchingAnchors.sort((a, b) => a.innerText.trim().length - b.innerText.trim().length);
       const anchor = matchingAnchors[0];
+      const anchorIdx = allVisible.indexOf(anchor);
 
-      // A. Check sibling elements directly following this anchor
-      let nextEl = anchor.nextElementSibling;
-      while (nextEl && options.length < 10) {
-        if (!isNavOrSystem(nextEl)) {
-          const txt = nextEl.innerText.trim();
-          if (nextEl.matches("button, input[type='submit']") || /^(submit|next|save|continue)\b/i.test(txt)) {
-            break;
-          }
-          const children = Array.from(nextEl.children).filter(ch => isElementVisible(ch) && !isNavOrSystem(ch));
-          if (children.length >= 2 && children.length <= 10) {
-            children.forEach(ch => addOption(ch, ch.innerText));
-            break;
-          } else if (txt.length > 0 && txt.length < 450) {
-            addOption(nextEl, txt);
-          }
-        }
-        nextEl = nextEl.nextElementSibling;
-      }
+      if (anchorIdx !== -1) {
+        // Find Submit/Next boundary
+        const submitIdx = allVisible.findIndex((el, idx) => {
+          if (idx <= anchorIdx) return false;
+          const txt = (el.innerText || el.value || "").trim().toLowerCase();
+          return el.matches("button, input[type='submit']") && (txt === "submit" || txt === "next" || txt === "save & next");
+        });
+        const endIdx = submitIdx !== -1 ? submitIdx : Math.min(allVisible.length, anchorIdx + 60);
 
-      // B. If not enough options found, check anchor's parent's siblings
-      if (options.length < 2 && anchor.parentElement) {
-        let parentNext = anchor.parentElement.nextElementSibling;
-        while (parentNext && options.length < 10) {
-          if (!isNavOrSystem(parentNext)) {
-            const pTxt = parentNext.innerText.trim();
-            if (parentNext.matches("button, input[type='submit']") || /^(submit|next|save|continue)\b/i.test(pTxt)) {
-              break;
-            }
-            const children = Array.from(parentNext.children).filter(ch => isElementVisible(ch) && !isNavOrSystem(ch));
-            if (children.length >= 2 && children.length <= 10) {
-              children.forEach(ch => addOption(ch, ch.innerText));
-              break;
-            } else if (pTxt.length > 0 && pTxt.length < 450) {
-              addOption(parentNext, pTxt);
+        // Collect visible leaf option elements between anchor and submit
+        for (let i = anchorIdx + 1; i < endIdx; i++) {
+          const el = allVisible[i];
+          const txt = (el.innerText || "").trim();
+          if (txt.length >= 2 && txt.length <= 450) {
+            const hasOptionChild = Array.from(el.children).some(c => {
+              const cTxt = (c.innerText || "").trim();
+              return cTxt.length >= 2 && cTxt.length <= 450 && isElementVisible(c);
+            });
+            if (!hasOptionChild) {
+              addOption(el, txt);
             }
           }
-          parentNext = parentNext.nextElementSibling;
         }
       }
 
@@ -794,14 +792,14 @@
     }
 
     // Strategy 2: Standard radio/checkbox inputs
-    const inputs = Array.from(container.querySelectorAll("input[type='radio'], input[type='checkbox']"))
+    const inputs = Array.from(scope.querySelectorAll("input[type='radio'], input[type='checkbox']"))
       .filter(i => isElementVisible(i) && !isNavOrSystem(i));
 
     if (inputs.length >= 2) {
       inputs.forEach(input => {
         let text = "";
-        const label = input.id ? container.querySelector(`label[for='${input.id}']`) : null;
-        if (label) text = label.innerText.trim();
+        const label = input.id ? document.querySelector(`label[for='${input.id}']`) : null;
+        if (label && isElementVisible(label)) text = label.innerText.trim();
         else {
           const parent = input.closest("label") || input.parentElement;
           text = parent ? parent.innerText.trim() : input.value;
@@ -827,10 +825,10 @@
     ];
 
     for (const sel of optionSelectors) {
-      const candidates = Array.from(container.querySelectorAll(sel)).filter(el => {
+      const candidates = Array.from(scope.querySelectorAll(sel)).filter(el => {
         if (!isElementVisible(el) || isNavOrSystem(el)) return false;
         const txt = el.innerText.trim();
-        return txt.length > 0 && txt.length < 450 && !/^(submit|next|save|continue)\b/i.test(txt);
+        return txt.length >= 2 && txt.length < 450 && !/^(submit|next|save|continue)\b/i.test(txt);
       });
 
       if (candidates.length >= 2 && candidates.length <= 10) {
@@ -839,27 +837,22 @@
       }
     }
 
-    // Strategy 4: Sibling card cluster detection (Strictly in non-navigation elements)
-    const parentContainers = Array.from(container.querySelectorAll("div, ul, ol, section, fieldset")).filter(
-      p => !isNavOrSystem(p) && !p.closest("header, nav, [class*='header' i], [class*='top-bar' i]")
+    // Strategy 4: Sibling card cluster detection
+    const parentContainers = Array.from(scope.querySelectorAll("div, ul, ol, section, fieldset")).filter(
+      p => isElementVisible(p) && !isNavOrSystem(p)
     );
 
     for (const p of parentContainers) {
       const children = Array.from(p.children).filter(c => {
         if (!isElementVisible(c) || isNavOrSystem(c)) return false;
         const txt = c.innerText.trim();
-        return txt.length > 0 && txt.length < 450 && !/^(submit|next|save|continue)\b/i.test(txt);
+        return txt.length >= 2 && txt.length < 450 && !/^(submit|next|save|continue)\b/i.test(txt);
       });
 
       if (children.length >= 2 && children.length <= 8) {
         children.forEach(c => addOption(c, c.innerText));
         if (options.length >= 2) return options;
       }
-    }
-
-    // Strategy 5: If not in body, scan document.body
-    if (options.length === 0 && container !== document.body) {
-      return findMCQOptions(document.body);
     }
 
     return options;
@@ -883,16 +876,17 @@
   }
 
   function extractQuestionData(container) {
-    // 1. Identify Question Prompt Text (Strictly ignoring header / navigation)
+    // 1. Identify Question Prompt Text (Strictly ignoring top header / navigation)
     let questionText = "";
 
     const questionHeaders = Array.from(container.querySelectorAll("h1, h2, h3, h4, p, div, span")).filter(el => {
       if (!isElementVisible(el) || isNavOrSystem(el)) return false;
       const t = el.innerText.trim();
-      return (/^\d+\.\s+[A-Z]/i.test(t) || /^question\s*\d+/i.test(t)) && t.length > 15;
+      return (/^\d+[\.\)]\s+[A-Za-z]/i.test(t) || /^question\s*\d+/i.test(t)) && t.length > 10;
     });
 
     if (questionHeaders.length > 0) {
+      questionHeaders.sort((a, b) => a.innerText.trim().length - b.innerText.trim().length);
       questionText = questionHeaders[0].innerText.trim();
     }
 
@@ -918,16 +912,14 @@
       questionText = cleanContext;
     }
 
-    // 2. Check if this is a Sentence Rearrangement Question
-    const isRearrange = checkIsRearrangeQuestion(container) || checkIsRearrangeQuestion(document.body) || /rearrange/i.test(questionText) || /arrange the following/i.test(questionText);
+    // 2. Check if this is a Sentence Rearrangement Question (Scoped strictly to active container)
+    const isRearrange = checkIsRearrangeQuestion(container);
     let sentenceTokens = [];
     if (isRearrange) {
       sentenceTokens = findRearrangeTokens(container);
     }
-    if (isRearrange && sentenceTokens.length === 0) {
-      sentenceTokens = findRearrangeTokens(document.body);
-    }
-    const finalIsRearrange = isRearrange || sentenceTokens.length >= 3;
+    // Question is rearrangement ONLY if rearrange keywords/Reset exist AND at least 3 visible chips are found
+    const finalIsRearrange = isRearrange && sentenceTokens.length >= 3;
 
     // 3. Identify Options (Disabled for rearrange questions)
     const options = finalIsRearrange ? [] : findMCQOptions(container);
@@ -980,7 +972,7 @@
 
     // Classify Question Type
     let detectedType = "auto_detect";
-    if (finalIsRearrange || sentenceTokens.length >= 3) {
+    if (finalIsRearrange) {
       detectedType = "rearrange_sentence";
     } else if (options.length > 0) {
       detectedType = "mcq";
@@ -1059,31 +1051,30 @@
       return true;
     }
 
-    // 2. MCQ: Has any option been checked or selected?
-    if (data.type === "mcq") {
-      const anyInputChecked = document.querySelector("input[type='radio']:checked, input[type='checkbox']:checked");
-      if (anyInputChecked && !anyInputChecked.closest("#gemini-live-host")) return true;
+    // 2. MCQ: Has any option in data.domReferences.options been checked or selected?
+    if (data.type === "mcq" && data.domReferences && Array.isArray(data.domReferences.options)) {
+      const anyOptSelected = data.domReferences.options.some(opt => {
+        if (!opt.element) return false;
+        const input = opt.element.matches("input[type='radio'], input[type='checkbox']")
+          ? opt.element
+          : opt.element.querySelector("input[type='radio'], input[type='checkbox']");
+        if (input && input.checked) return true;
 
-      const anyClassSelected = document.querySelector(
-        "[class*='selected' i], [class*='checked' i], [class*='active' i], [aria-checked='true']"
-      );
-      if (anyClassSelected && !anyClassSelected.closest("#gemini-live-host, header, nav, video")) return true;
-
-      if (data.domReferences && data.domReferences.options) {
-        const anyOptSelected = data.domReferences.options.some(opt => {
-          if (!opt.element) return false;
-          const cls = (opt.element.className || "").toLowerCase();
-          return cls.includes("selected") || cls.includes("active") || cls.includes("checked") || opt.element.getAttribute("aria-checked") === "true";
-        });
-        if (anyOptSelected) return true;
-      }
+        const cls = (opt.element.className || "").toLowerCase();
+        return (
+          cls.includes("selected") ||
+          cls.includes("checked") ||
+          opt.element.getAttribute("aria-checked") === "true"
+        );
+      });
+      if (anyOptSelected) return true;
     }
 
     // 3. Rearrange: Have tokens already been moved or slot blanks filled?
-    if (data.type === "rearrange_sentence") {
-      const slots = document.querySelectorAll("[class*='slot' i], [class*='blank' i], [class*='drop' i]");
+    if (data.type === "rearrange_sentence" && container) {
+      const slots = container.querySelectorAll("[class*='slot' i], [class*='blank' i], [class*='drop' i]");
       if (slots.length > 0) {
-        const filledSlots = Array.from(slots).filter(s => s.innerText.trim().length > 0);
+        const filledSlots = Array.from(slots).filter(s => isElementVisible(s) && s.innerText.trim().length > 0);
         if (filledSlots.length >= 2) return true;
       }
     }
@@ -1104,7 +1095,6 @@
 
   // -------------------------------------------------------------
   // 4. Automation Solvers (Synthetic DOM Actions)
-  // -------------------------------------------------------------
   function highlightElement(el) {
     if (!el) return;
     try {
@@ -1176,7 +1166,7 @@
     if (typeof solution.index === "number") indices.push(solution.index);
 
     let clickedCount = 0;
-    let optionsList = domRefs && Array.isArray(domRefs.options) && domRefs.options.length > 0 ? domRefs.options : findMCQOptions(document.body);
+    let optionsList = domRefs && Array.isArray(domRefs.options) && domRefs.options.length > 0 ? domRefs.options : findMCQOptions(findActiveQuestionContainer());
 
     function cleanString(str) {
       if (!str) return "";
@@ -1210,18 +1200,18 @@
       }
     }
 
-    // Attempt 2 (FAILPROOF FULL-PAGE SEARCH): Search the entire page DOM for elements containing the answer text
+    // Attempt 2 (FAILPROOF FULL-PAGE SEARCH): Search the visible DOM for elements containing the answer text
     if (clickedCount === 0 && answers.length > 0) {
       for (const ans of answers) {
         const targetClean = cleanString(ans);
-        if (!targetClean || targetClean.length < 5) continue;
+        if (!targetClean || targetClean.length < 3) continue;
 
         const allCandidates = Array.from(document.querySelectorAll("div, p, span, li, button, label, td, tr"))
           .filter(el => {
             if (!isElementVisible(el) || isNavOrSystem(el)) return false;
-            if (el.innerText.length > 800) return false; // Ignore large wrappers/passages
+            if (el.innerText.length > 600) return false; // Ignore large wrappers/passages
             const t = cleanString(el.innerText);
-            return t === targetClean || t.includes(targetClean) || (targetClean.length > 20 && targetClean.includes(t) && t.length > 20);
+            return t === targetClean || t.includes(targetClean) || (targetClean.length > 15 && targetClean.includes(t) && t.length > 15);
           });
 
         if (allCandidates.length > 0) {
@@ -1235,13 +1225,19 @@
       }
     }
 
+    // Attempt 3: If indices specified and valid in optionsList
+    if (clickedCount === 0 && indices.length > 0 && optionsList[indices[0]]) {
+      simulateClick(optionsList[indices[0]].element);
+      clickedCount++;
+    }
+
     const answerLabel = answers.length > 0 ? answers.join(", ") : (optionsList[0]?.text || "Option");
     if (clickedCount > 0) {
       showAnswerBanner(answerLabel, solution.explanation || "Correct option selected on page", "MCQ Answer", 5000);
       return `Selected option: ${answerLabel}`;
     }
 
-    // Attempt 3: If options were identified, click the first one as emergency fallback
+    // Attempt 4: If options were identified, click the first one as emergency fallback
     if (optionsList.length > 0) {
       simulateClick(optionsList[0].element);
       showAnswerBanner(optionsList[0].text, "Selected option", "MCQ Answer", 5000);
@@ -1299,7 +1295,7 @@
 
   // Solve Rearrange the Sentence
   async function executeRearrange(solution, domRefs) {
-    let tokens = domRefs && domRefs.sentenceTokens && domRefs.sentenceTokens.length > 0 ? domRefs.sentenceTokens : findRearrangeTokens(document.body);
+    let tokens = domRefs && domRefs.sentenceTokens && domRefs.sentenceTokens.length > 0 ? domRefs.sentenceTokens : findRearrangeTokens(findActiveQuestionContainer());
     if (!tokens || tokens.length === 0) return "No rearrange tokens found on page";
 
     let orderedSequence = [];
@@ -1419,10 +1415,11 @@
   async function triggerSolve(isAutomated = false) {
     if (!state.isEnabled) return;
 
-    // If user clicked manually ("Solve Current"), allow unfreezing any stuck state
-    if (state.isProcessing) {
-      if (!isAutomated || Date.now() - state.lastSolveTimestamp > 10000) {
-        console.warn("[Gemini Live] Resetting stuck processing lock for manual solve");
+    // If user clicked manually ("Solve Current" or Alt+S), instantly unfreeze any stuck processing state
+    if (!isAutomated) {
+      state.isProcessing = false;
+    } else if (state.isProcessing) {
+      if (Date.now() - state.lastSolveTimestamp > 8000) {
         state.isProcessing = false;
       } else {
         return;
@@ -1435,8 +1432,13 @@
 
     const container = findActiveQuestionContainer();
     const data = extractQuestionData(container);
-    const questionId = getQuestionIdentifier(container, data);
 
+    // If page is between questions / transitioning / no question content yet, do not trigger
+    if (!data.questionText && (!data.options || data.options.length === 0) && (!data.sentenceTokens || data.sentenceTokens.length === 0) && (!data.dropdowns || data.dropdowns.length === 0) && !data.domReferences.writingArea) {
+      return;
+    }
+
+    const questionId = getQuestionIdentifier(container, data);
     if (!questionId) return;
 
     if (isAutomated) {
@@ -1464,7 +1466,7 @@
     state.lastSolveTimestamp = Date.now();
     state.isProcessing = true;
 
-    console.log("%c[Gemini Live]%c Solving current question: " + questionId, "color:#818cf8;font-weight:bold", "color:#fff");
+    console.log("%c[Gemini Live]%c Solving question: " + questionId, "color:#818cf8;font-weight:bold", "color:#fff");
     console.log("[Gemini Live] Detected Category:", data.type.toUpperCase());
     console.log("[Gemini Live] Question Prompt:", data.questionText.slice(0, 80));
 
@@ -1544,11 +1546,17 @@
     } catch (err) {
       console.error("[Gemini Live Solver Error]:", err);
       updateStatus("Error", "error", "FAILED");
-      showToast(err.message);
-      showInfo(`⚠️ ${err.message}`);
+
+      const errLower = (err.message || "").toLowerCase();
+      if (errLower.includes("context invalidated") || errLower.includes("extension context invalidated")) {
+        showToast("Extension reloaded. Please refresh this page (F5) to reconnect.");
+        showInfo("🔄 Extension reloaded. Please refresh this tab (F5).");
+      } else {
+        showToast(err.message);
+        showInfo(`⚠️ ${err.message}`);
+      }
 
       // Stop auto-watcher immediately on rate-limit or missing key to protect quota
-      const errLower = (err.message || "").toLowerCase();
       if (errLower.includes("429") || errLower.includes("quota") || errLower.includes("rate limit") || errLower.includes("not configured") || errLower.includes("missing")) {
         const autoToggle = document.getElementById("gemini-autowatch-toggle");
         if (autoToggle) autoToggle.checked = false;
@@ -1557,7 +1565,8 @@
       }
     } finally {
       state.isProcessing = false;
-      if (btnSolve) btnSolve.disabled = !state.isEnabled;
+      const currentBtnSolve = document.getElementById("gemini-btn-solve");
+      if (currentBtnSolve) currentBtnSolve.disabled = !state.isEnabled;
     }
   }
 
@@ -1575,8 +1584,13 @@
       if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
       clearTimeout(autoWatchDebounce);
       autoWatchDebounce = setTimeout(() => {
-        triggerSolve(true);
-      }, 1000);
+        if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
+        const container = findActiveQuestionContainer();
+        const currentId = getQuestionIdentifier(container);
+        if (currentId && !state.solvedQuestionIds.has(currentId) && currentId !== state.lastSolvedQuestionId) {
+          triggerSolve(true);
+        }
+      }, 1200);
     });
 
     state.observer.observe(document.body, {
@@ -1631,19 +1645,30 @@
     }
   });
 
-  // Dismiss answer banner when moving to the next question and auto-solve next
+  // Direct in-page keyboard shortcut backup for Alt+S and Alt+H
+  window.addEventListener("keydown", (e) => {
+    if (e.altKey && (e.key === "s" || e.key === "S")) {
+      e.preventDefault();
+      if (state.isEnabled) {
+        triggerSolve(false);
+      }
+    } else if (e.altKey && (e.key === "h" || e.key === "H")) {
+      e.preventDefault();
+      const widget = document.getElementById("gemini-widget");
+      if (widget) {
+        state.hudMinimized = !state.hudMinimized;
+        widget.classList.toggle("minimized", state.hudMinimized);
+      }
+    }
+  });
+
+  // Dismiss answer banner when moving to the next question
   document.addEventListener("click", (e) => {
     const btn = e.target.closest("button, a, input[type='button'], input[type='submit']");
     if (btn && !btn.closest("#gemini-live-host")) {
       const text = (btn.innerText || btn.value || "").trim().toLowerCase();
       if (text.includes("next") || text.includes("submit") || text.includes("continue") || text === "save & next") {
-        setTimeout(hideAnswerBanner, 600);
-        // After advancing to the next question, trigger solve if auto-solve is enabled
-        setTimeout(() => {
-          if (state.isEnabled && state.isAutoWatch && !state.isProcessing) {
-            triggerSolve(true);
-          }
-        }, 1800);
+        setTimeout(hideAnswerBanner, 500);
       }
     }
   }, true);
