@@ -412,40 +412,106 @@
     return false;
   }
 
+  function getCurrentQuestionMeta() {
+    const fullText = document.body ? document.body.innerText : "";
+    const progressMatch = fullText.match(/\b(\d+)\s+of\s+(\d+)\s+questions?\b/i) ||
+                          fullText.match(/\bquestion\s*(\d+)\s+of\s+(\d+)\b/i) ||
+                          fullText.match(/\b(\d+)\s+of\s+(\d+)\b/i);
+    let currentNum = null;
+    let totalNum = null;
+    if (progressMatch) {
+      currentNum = parseInt(progressMatch[1], 10);
+      totalNum = parseInt(progressMatch[2], 10);
+    }
+    return { currentNum, totalNum };
+  }
+
   function findActiveQuestionContainer() {
+    const meta = getCurrentQuestionMeta();
+    const currentNum = meta.currentNum;
+
+    // 1. If active element is an input/choice in a question, use its container
     const focused = document.activeElement;
     if (focused && focused !== document.body && !focused.closest("#gemini-live-host, header, nav, [class*='header' i], [class*='top-bar' i]")) {
-      const container = focused.closest(".question, .question-card, .quiz-question, .exercise, [role='region'], fieldset, form, main, .test-container");
+      const container = focused.closest(".question, .question-card, .quiz-question, .exercise, [role='region'], fieldset, form, .test-container");
       if (container) return container;
     }
 
-    // Look for question prompt element with numbering (e.g. "1. Rearrange...", "Question 1")
-    const numberedHeaders = Array.from(document.querySelectorAll("h1, h2, h3, h4, p, div, span")).filter(el => {
-      if (!isElementVisible(el) || isNavOrSystem(el)) return false;
-      const t = el.innerText.trim();
-      return /^\d+\.\s+[A-Z]/i.test(t) || /^question\s*\d+/i.test(t);
-    });
+    // 2. Target the specific question header matching currentNum (e.g. "2. Which of...")
+    let targetHeader = null;
+    if (currentNum) {
+      const targetRegex = new RegExp(`^\\s*${currentNum}[\\.\\)]\\s+`, "i");
+      const altRegex = new RegExp(`^\\s*question\\s*${currentNum}\\b`, "i");
 
-    if (numberedHeaders.length > 0) {
-      let current = numberedHeaders[0];
-      while (current && current.parentElement && current.parentElement !== document.body) {
-        if (
-          current.parentElement.innerText.includes("Select the best answer") ||
-          current.parentElement.innerText.includes("Select the correct") ||
-          current.parentElement.querySelector("button, input[type='radio'], [class*='option' i]")
-        ) {
-          return current.parentElement;
-        }
-        current = current.parentElement;
+      const candidates = Array.from(document.querySelectorAll("h1, h2, h3, h4, p, div, span")).filter(el => {
+        if (!isElementVisible(el) || isNavOrSystem(el)) return false;
+        const t = el.innerText.trim();
+        return targetRegex.test(t) || altRegex.test(t);
+      });
+
+      if (candidates.length > 0) {
+        // Pick the leaf candidate with the shortest text
+        candidates.sort((a, b) => a.innerText.trim().length - b.innerText.trim().length);
+        targetHeader = candidates[0];
       }
-      if (current) return current;
     }
 
+    // 3. Fallback: Find visible numbered headers and pick the one in current viewport
+    if (!targetHeader) {
+      const allHeaders = Array.from(document.querySelectorAll("h1, h2, h3, h4, p, div, span")).filter(el => {
+        if (!isElementVisible(el) || isNavOrSystem(el)) return false;
+        const t = el.innerText.trim();
+        return (/^\d+[\.\)]\s+[A-Z]/i.test(t) || /^question\s*\d+/i.test(t)) && t.length > 10;
+      });
+
+      if (allHeaders.length > 0) {
+        // Prefer header closest to the upper viewport
+        allHeaders.sort((a, b) => {
+          const aTop = a.getBoundingClientRect().top;
+          const bTop = b.getBoundingClientRect().top;
+          const aScore = aTop >= -20 && aTop <= window.innerHeight * 0.8 ? aTop : Math.abs(aTop) + 10000;
+          const bScore = bTop >= -20 && bTop <= window.innerHeight * 0.8 ? bTop : Math.abs(bTop) + 10000;
+          return aScore - bScore;
+        });
+        targetHeader = allHeaders[0];
+      }
+    }
+
+    // 4. Walk up from targetHeader to find its enclosing question container
+    if (targetHeader) {
+      let current = targetHeader;
+      let bestContainer = targetHeader;
+      while (current && current.parentElement && current.parentElement !== document.body) {
+        const p = current.parentElement;
+        if (isNavOrSystem(p)) break;
+
+        const hasQuestionControls = p.querySelector(
+          "input, select, textarea, button, [class*='option' i], [class*='chip' i], [class*='choice' i]"
+        );
+        if (hasQuestionControls) {
+          bestContainer = p;
+        }
+
+        if (
+          p.classList.contains("question") ||
+          p.classList.contains("question-card") ||
+          p.classList.contains("quiz-card") ||
+          p.classList.contains("exercise") ||
+          p.getAttribute("role") === "region"
+        ) {
+          bestContainer = p;
+          break;
+        }
+        current = p;
+      }
+      if (bestContainer) return bestContainer;
+    }
+
+    // 5. Check candidate selectors
     const candidateSelectors = [
-      "main", "#content", ".test-container", ".question-container",
       ".question.active", ".active-question", ".current-question",
-      ".question-card", ".question", ".quiz-card", ".exercise", "form",
-      "[data-question]:not([style*='display: none'])"
+      ".question-card", ".question", ".quiz-card", ".exercise",
+      ".test-container", "main", "#content"
     ];
 
     for (const selector of candidateSelectors) {
@@ -466,7 +532,6 @@
     if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
       return false;
     }
-    // Element must have dimensions in DOM (rendered, not collapsed)
     const rect = el.getBoundingClientRect();
     return (
       rect.width > 0 ||
@@ -477,39 +542,40 @@
     );
   }
 
-  // Check if current question is a Sentence / Phrase Rearrangement question
+  // Check if current question is a Sentence / Phrase Rearrangement question (Scoped to current question)
   function checkIsRearrangeQuestion(container) {
-    const checkText = ((container ? container.innerText : "") + " " + (document.body ? document.body.innerText : "")).toLowerCase();
+    if (!container) return false;
+    const pageText = (container.innerText || "").toLowerCase();
     if (
-      checkText.includes("rearrange the phrases") ||
-      checkText.includes("rearrange the words") ||
-      checkText.includes("rearrange words") ||
-      checkText.includes("rearrange phrases") ||
-      checkText.includes("rearrange the sentence") ||
-      checkText.includes("arrange the following sentences") ||
-      checkText.includes("arrange the sentences") ||
-      checkText.includes("arrange sentences") ||
-      checkText.includes("arrange the words") ||
-      checkText.includes("arrange the phrases") ||
-      checkText.includes("form a logical sentence") ||
-      checkText.includes("form a sentence") ||
-      checkText.includes("correct sequence") ||
-      checkText.includes("logical sequence") ||
-      checkText.includes("proper sequence")
+      pageText.includes("rearrange the phrases") ||
+      pageText.includes("rearrange the words") ||
+      pageText.includes("rearrange words") ||
+      pageText.includes("rearrange phrases") ||
+      pageText.includes("rearrange the sentence") ||
+      pageText.includes("arrange the following sentences") ||
+      pageText.includes("arrange the sentences") ||
+      pageText.includes("arrange sentences") ||
+      pageText.includes("arrange the words") ||
+      pageText.includes("arrange the phrases") ||
+      pageText.includes("form a logical sentence") ||
+      pageText.includes("form a sentence") ||
+      pageText.includes("correct sequence") ||
+      pageText.includes("logical sequence") ||
+      pageText.includes("proper sequence")
     ) {
       return true;
     }
 
-    const hasResetBtn = Array.from(document.querySelectorAll("button, a, input[type='button'], div[role='button']"))
+    const hasResetBtn = Array.from(container.querySelectorAll("button, a, input[type='button'], div[role='button']"))
       .some(b => !isNavOrSystem(b) && (b.innerText || b.value || "").trim().toLowerCase().startsWith("reset"));
-    if (hasResetBtn && (checkText.includes("“") || checkText.includes("\"") || checkText.includes("active voice") || checkText.includes("passive voice") || checkText.includes("sentence") || checkText.includes("phrase"))) {
+    if (hasResetBtn && (pageText.includes("“") || pageText.includes("\"") || pageText.includes("sentence") || pageText.includes("phrase"))) {
       return true;
     }
 
     return false;
   }
 
-  // Extract scrambled tokens / chips for sentence rearrangement
+  // Extract scrambled tokens / chips for sentence rearrangement (Strictly within current container)
   function findRearrangeTokens(container) {
     const tokens = [];
     const seen = new Set();
@@ -538,8 +604,8 @@
       return !hasChipChild;
     }
 
-    // Strategy 0: Find instruction anchor ("rearrange the words or phrases", "arrange the following sentences", etc.)
-    const allLabels = Array.from(document.querySelectorAll("*")).filter(el => !isNavOrSystem(el));
+    // Strategy 0: Find instruction anchor within the current question scope
+    const allLabels = Array.from(scope.querySelectorAll("*")).filter(el => !isNavOrSystem(el));
     const matchingAnchors = allLabels.filter(el => {
       const t = el.innerText.trim().toLowerCase();
       return (
@@ -551,11 +617,10 @@
     });
 
     if (matchingAnchors.length > 0) {
-      // Pick the leaf anchor (shortest text length)
       matchingAnchors.sort((a, b) => a.innerText.trim().length - b.innerText.trim().length);
       const anchor = matchingAnchors[0];
 
-      const allElements = Array.from(document.querySelectorAll("*"));
+      const allElements = Array.from(scope.querySelectorAll("*"));
       const anchorIdx = allElements.indexOf(anchor);
 
       const resetBtn = allElements.find(el => {
@@ -950,32 +1015,36 @@
 
   // Stable global question identifier extractor to prevent duplicate answers
   function getQuestionIdentifier(container, data) {
-    const fullText = (document.body ? document.body.innerText : "") || (container ? container.innerText : "");
-    // Match question number like "1 of 5 questions", "1 of 6 questions", "Question 2 of 10"
-    const numMatch = fullText.match(/\b(\d+)\s+of\s+(\d+)\s+questions?\b/i) ||
-                     fullText.match(/\bquestion\s*(\d+)\s+of\s+(\d+)\b/i);
-
-    // Match prompt heading like "1. Aarav is writing to his friend..."
-    const titleMatch = fullText.match(/(?:^|\n)\s*(\d+)[\.\)]\s+([^\n\r]{8,90})/);
-
+    const meta = getCurrentQuestionMeta();
     let prefix = "";
-    if (numMatch) {
-      prefix = `Q_${numMatch[1]}_OF_${numMatch[2]}`;
+    if (meta.currentNum && meta.totalNum) {
+      prefix = `Q_${meta.currentNum}_OF_${meta.totalNum}`;
+    } else if (meta.currentNum) {
+      prefix = `Q_${meta.currentNum}`;
     }
 
     let titlePart = "";
-    if (titleMatch) {
-      titlePart = `${titleMatch[1]}_${titleMatch[2].slice(0, 50).replace(/[^a-zA-Z0-9]/g, "_").toLowerCase()}`;
-    } else if (data && data.questionText && data.questionText.length > 10) {
+    if (data && data.questionText && data.questionText.length > 5) {
       titlePart = data.questionText.slice(0, 50).replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+    } else if (container) {
+      const headerEl = container.querySelector("h1, h2, h3, h4, p");
+      if (headerEl) {
+        titlePart = headerEl.innerText.slice(0, 50).replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+      }
+    }
+
+    if (!titlePart && meta.currentNum) {
+      const targetRegex = new RegExp(`(?:^|\\n)\\s*${meta.currentNum}[\\.\\)]\\s+([^\\n\\r]{6,80})`, "i");
+      const match = (document.body ? document.body.innerText : "").match(targetRegex);
+      if (match) {
+        titlePart = `${meta.currentNum}_${match[1].replace(/[^a-zA-Z0-9]/g, "_").toLowerCase()}`;
+      }
     }
 
     if (prefix && titlePart) {
       return `${prefix}::${titlePart}`;
     }
-    if (prefix) return prefix;
-    if (titlePart) return titlePart;
-    return fullText.slice(0, 80).replace(/\s+/g, "_").toLowerCase();
+    return prefix || titlePart || "active_question";
   }
 
   // Token-Saver: Check if question is already answered on screen
@@ -1349,7 +1418,16 @@
   // -------------------------------------------------------------
   async function triggerSolve(isAutomated = false) {
     if (!state.isEnabled) return;
-    if (state.isProcessing) return;
+
+    // If user clicked manually ("Solve Current"), allow unfreezing any stuck state
+    if (state.isProcessing) {
+      if (!isAutomated || Date.now() - state.lastSolveTimestamp > 10000) {
+        console.warn("[Gemini Live] Resetting stuck processing lock for manual solve");
+        state.isProcessing = false;
+      } else {
+        return;
+      }
+    }
 
     // Immediately dismiss any open speaking teleprompter or previous answer banner
     const teleprompter = document.getElementById("gemini-teleprompter");
@@ -1509,7 +1587,8 @@
     // Also check every 2 seconds to detect if user advanced to next question
     autoWatchInterval = setInterval(() => {
       if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
-      const currentId = getQuestionIdentifier();
+      const container = findActiveQuestionContainer();
+      const currentId = getQuestionIdentifier(container);
       if (currentId && !state.solvedQuestionIds.has(currentId) && currentId !== state.lastSolvedQuestionId) {
         triggerSolve(true);
       }
