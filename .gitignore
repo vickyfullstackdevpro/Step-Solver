@@ -5,3 +5,6 @@ desktop.ini
 
 # Logs
 *.log
+
+# Build & Store Archives
+*.zip
