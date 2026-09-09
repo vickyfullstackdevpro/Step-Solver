@@ -1,6 +1,7 @@
 // background.js - Service Worker for Gemini Live Question Solver
 
-const DEFAULT_MODEL = "gemini-3.6-flash";
+const DEFAULT_MODEL = "gemini-3.1-flash-lite-preview";
+const BURNT_KEY = "AQ.Ab8RN6I1C1o7hEEyqfwMJUFw1TdSg-kRieVIS06703505QTCrQ";
 
 // Listen for messages from popup or content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -20,6 +21,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === "GET_AVAILABLE_MODELS") {
     autoDetectBestModel(request.apiKey)
+      .then((res) => sendResponse({ success: true, ...res }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "REFRESH_ALL_KEYS") {
+    handleRefreshAllKeys()
+      .then((res) => sendResponse({ success: true, ...res }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "REFRESH_SINGLE_KEY") {
+    handleRefreshSingleKey(request.keyIndex)
       .then((res) => sendResponse({ success: true, ...res }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
@@ -76,8 +91,13 @@ async function autoDetectBestModel(apiKey) {
   }
 
   // Model selection priority:
-  // Prefer newest Flash models (gemini-3.6-flash, gemini-2.0-flash, gemini-1.5-flash) for fast solving with highest RPM
+  // Prefer gemini-3.1-flash-lite-preview for ultra-low token consumption and fastest execution,
+  // then fallback to other flash models if unavailable for the key
   const priorityPatterns = [
+    /^gemini-3\.1-flash-lite-preview/i,
+    /^gemini-3\.1-flash-lite/i,
+    /^gemini-3\.\d+-flash-lite/i,
+    /flash-lite/i,
     /^gemini-3\.6-flash/i,
     /^gemini-3\.\d+-flash/i,
     /^gemini-2\.0-flash/i,
@@ -129,7 +149,6 @@ async function getOrDetectModel(apiKey) {
 
 // Query Gemini API with question payload and automatic key failover (Max 10 keys)
 async function handleSolveQuestion(payload) {
-  const BURNT_KEY = "AQ.Ab8RN6I1C1o7hEEyqfwMJUFw1TdSg-kRieVIS06703505QTCrQ";
   const settings = await chrome.storage.local.get([
     "geminiApiKeys",
     "activeKeyIndex",
@@ -141,10 +160,13 @@ async function handleSolveQuestion(payload) {
   let activeIndex = typeof settings.activeKeyIndex === "number" ? settings.activeKeyIndex : 0;
 
   // Filter out burned / invalid key
-  keys = keys.filter(k => k && k.key && k.key.trim() !== BURNT_KEY);
+  keys = keys.filter(k => {
+    const kStr = typeof k === "string" ? k : k?.key;
+    return kStr && typeof kStr === "string" && kStr.trim() !== BURNT_KEY;
+  });
 
   // Migrate legacy single key if present
-  if (keys.length === 0 && settings.geminiApiKey && settings.geminiApiKey.trim() !== BURNT_KEY) {
+  if (keys.length === 0 && settings.geminiApiKey && typeof settings.geminiApiKey === "string" && settings.geminiApiKey.trim() !== BURNT_KEY) {
     keys.push({
       key: settings.geminiApiKey.trim(),
       model: settings.geminiModel || "Auto-Selected",
@@ -178,7 +200,12 @@ async function handleSolveQuestion(payload) {
   // Loop through available keys in pool if rate limits / token drains occur
   while (attempts < keys.length) {
     const keyObj = keys[currentIndex];
-    const apiKey = keyObj.key.trim();
+    const apiKey = (typeof keyObj === "string" ? keyObj : keyObj?.key || "").trim();
+    if (!apiKey) {
+      currentIndex = (currentIndex + 1) % keys.length;
+      attempts++;
+      continue;
+    }
 
     // Auto-detect optimal model for this key if not already configured
     let model = keyObj.model;
@@ -266,14 +293,44 @@ ${JSON.stringify(payload.dropdowns || [], null, 2)}
 Extracted Scrambled Tokens (for Rearrange Sentence):
 ${JSON.stringify(payload.sentenceTokens || [], null, 2)}
 
+Extracted Word Choice Chips (for Multi-Blank Cloze Passage):
+${JSON.stringify(payload.wordChoices || [], null, 2)}
+
 Writing Criteria / Constraints:
 ${JSON.stringify(payload.writingConstraints || {}, null, 2)}
 
 CRITICAL CLASSIFICATION & SOLVING RULES:
-- If Question Category is 'rearrange_sentence' OR if the question asks to 'rearrange the phrases', 'rearrange the words', 'arrange the following sentences', or 'arrange sentences in the correct sequence' to form a logical story/sentence (e.g. Aarav's trip, sentences/phrases into sequence), THIS IS A REARRANGE SENTENCE QUESTION!
-- For rearrange sentence, you MUST set "detected_type": "rearrange_sentence", specify the 0-based token index sequence in "reordered_token_indices", list the words/sentences in "reordered_token_texts", and return the full sentence/narrative in "reconstructed_sentence".
-- If 'Extracted Options' is not empty AND it is NOT a rearrange question (such as choices A, B, C, D or combination choices like ADCB, DABC, CADB, BCDA), THIS IS AN MCQ QUESTION!
-- For any question with choices to select from, you MUST set "detected_type": "mcq" and specify the exact correct option text in "mcq_answers" and its 0-based index in "mcq_indices".
+- If Question Category is 'writing' OR if a writing textarea/box is present (payload.writingConstraints && payload.writingConstraints.hasTextarea) OR if the prompt asks to "write a paragraph", "write an essay", "write an email", "write a letter", "write a response", "describe", "summarize", or specifies a word limit: THIS IS A WRITING QUESTION!
+  * You MUST set "detected_type": "writing".
+  * In "writing_answer", write a comprehensive, articulate, natural, grammatically flawless, high-scoring response that directly addresses all instructions.
+  * Strictly adhere to any stated word limit or paragraph structure (e.g. 50-100 words, 100-150 words).
+  * DO NOT classify this as MCQ even if format buttons or toolbars are present!
+- If the question asks to arrange sentences/paragraphs and provides multiple-choice permutation options like "ADCB", "DCAB", "CADB", "1-3-4-2": THIS IS AN MCQ QUESTION!
+  * Set "detected_type": "mcq" and return the chosen permutation in "mcq_answers" (e.g. ["DCAB"]) and its index in "mcq_indices".
+- If Question Category is 'cloze_passage' OR if the question prompt asks to "complete the ... by choosing the correct words for the blanks", "fill in the blanks with words that best complete the sentence", "words for the blanks", "fill in the blanks with suitable words", "fill in the blanks", "complete the passage", "complete the announcement", "fill in each blank", or if the passage contains multiple blank slots/spaces: THIS IS A MULTI-BLANK CLOZE PASSAGE QUESTION!
+  * For cloze passage, you MUST set "detected_type": "cloze_passage".
+  * The passage has multiple blanks (e.g. 1st blank, 2nd blank, 3rd blank, 4th blank, 5th blank).
+  * You MUST provide the suitable matching word from the available word choices for EVERY blank in exact sequential order from first blank to last blank.
+  * Return the complete ordered list of words in "ordered_fill_blanks" (e.g. ["arrivals", "departures", "security", "board", "gate"]). If there are 5 blanks, "ordered_fill_blanks" MUST contain exactly 5 words!
+  * Return the complete reconstructed passage with all blanks filled in "reconstructed_passage".
+  * CRITICAL: DO NOT classify multiple-blank questions as single-option MCQ! All blanks must be solved! NEVER return a single generic word like "Option".
+- If Question Category is 'rearrange_sentence' OR if the question asks to 'rearrange the phrases', 'rearrange the words', 'arrange the following sentences', or 'arrange sentences in the correct sequence' to form a logical story/sentence where clickable chips/tokens are provided on screen: THIS IS A REARRANGE SENTENCE QUESTION!
+  * CRITICAL FOR REARRANGEMENT QUESTIONS:
+    - The tokens on screen are in SCRAMBLED or ARBITRARY order.
+    - You MUST analyze the narrative/chronological timeline or grammatical syntax to determine the true, correct sequence.
+    - NEVER simply output the on-screen [0, 1, 2, ...] order! You must provide the genuine rearranged sequence.
+    - Format 1 (Large / Full Sentences / Story): Each token is a full sentence describing an event. Determine the chronological sequence (Departure / Morning -> Daytime activities -> Culmination -> Evening campfire -> Reflection / Conclusion).
+    - Format 2 (Small Words / Phrases): Each token is a word or short phrase. Arrange them to form a single, grammatically correct English sentence from left to right.
+    - Format 3 (Clauses with Conjunctions): Analyze coordinating conjunctions ('so', 'but', 'for', 'as', 'because', 'although'). Start with the capital letter clause, sequence the causes/contrasts/consequences, end with the period.
+  * For rearrange sentence, you MUST:
+    1) Set "detected_type": "rearrange_sentence".
+    2) Specify the 0-based index sequence in "reordered_token_indices" representing the permutation to click (e.g. [3, 1, 4, 0, 2] or [4, 3, 2, 0, 5, 1, 6]).
+    3) List each phrase/sentence in this exact sequence in "reordered_token_texts".
+    4) Return the full properly ordered narrative or sentence in "reconstructed_sentence".
+- If 'Extracted Options' is not empty and NOT cloze/rearrange, OR if the question asks to "fill in the blank", "fill in the blank with the best answer", "fill in the blank with the correct option", "select the best answer", "select the suitable word", "choose the correct", or fill a single blank with options (e.g. "The Taj Mahal encompasses ________ hectares", or reported speech fill-in with chips [could, can, should, must]): THIS IS AN MCQ QUESTION!
+  * For any question with choices or option chips to select from for a single blank or question, you MUST set "detected_type": "mcq" and specify the exact single correct option text in "mcq_answers" (e.g. ["could"]) and its 0-based index in "mcq_indices" (e.g. [0]).
+  * DO NOT classify single fill-in-the-blank questions as sentence rearrangement!
+  * NEVER return generic labels like "Option" in "mcq_answers" — return the exact option text.
 - NEVER classify a question as "speaking" if there are selectable options, sentences to arrange, or multiple choices on screen! Speaking is ONLY for oral voice recording tasks that have an active microphone button.
 - If the question is about paragraph ordering (S1..S6, A..D) with options like ADCB, DABC, CADB, BCDA, analyze the logical cohesion and pick the correct option.
 
@@ -286,16 +343,29 @@ TASK RULES BY QUESTION TYPE:
    - If dropdowns are present, specify the exact option value/text to select in "dropdown_selections".
    - If fill-in blanks are present, specify the exact word(s) in "text_blanks".
 
-3. REARRANGE THE SENTENCE:
-   - Identify the correct grammatical, natural sentence (active voice if requested).
-   - Return the 0-based index sequence of the tokens in "reordered_token_indices".
-   - Return array of ordered token strings in "reordered_token_texts".
-   - Return the reconstructed full sentence string in "reconstructed_sentence".
+3. REARRANGE THE SENTENCE / STORY:
+   - Determine the correct chronological or syntactic sequence:
+     * For Stories / Large Sentences: Chronological progression of events from start to finish.
+     * For Sentences / Clauses:
+       - Starting Clause begins with a capital letter establishing the subject/situation.
+       - Conjunctions: 'for' introduces reasons ('because'), 'so' introduces consequences, 'but' introduces contrasts, 'as' introduces simultaneous causes.
+       - Ending Clause concludes thought with a period.
+   - REASONING SEQUENCE:
+     1) "clause_flow_analysis": Explain the chronological timeline or grammatical structure.
+     2) "reconstructed_sentence": Write out the complete, grammatically flawless, natural sentence or story.
+     3) "reordered_token_texts": List the exact phrase/sentence tokens in the exact order they should be clicked.
+     4) "reordered_token_indices": An array of 0-based integers representing the permutation of original token indices in the new order (e.g. [3, 1, 4, 0, 2]). Index 0 corresponds to token index 0. The first item in this array MUST be the index of the token to click first! DO NOT return [0, 1, 2, 3, ...] in the on-screen order!
 
-4. WRITING QUESTION:
+4. CLOZE / MULTI-BLANK PASSAGE:
+   - Carefully analyze the passage context, blank positions, and discourse markers.
+   - Match each blank slot in sequential order (Blank 1 -> Blank 2 -> Blank 3) to the best option from the choices.
+   - Return the ordered array of chosen words in "ordered_fill_blanks": ["WordForBlank1", "WordForBlank2", "WordForBlank3"].
+   - Return the fully filled passage in "reconstructed_passage".
+
+5. WRITING QUESTION:
    - Write a high-quality, articulate, grammatically flawless response in "writing_answer". Respect any word count or prompt criteria.
 
-5. SPEAKING QUESTION:
+6. SPEAKING QUESTION:
    - Only for questions where the user must speak into a microphone.
    - Provide a natural, fluent spoken script in "speaking_script".
    - If the speaking question includes any dropdown to pick first, provide the correct choice in "dropdown_selections".
@@ -305,10 +375,12 @@ You MUST reply ONLY with a single valid RFC 8259 JSON object without markdown co
 CRITICAL: All keys and strings MUST be enclosed in standard double quotes (""). Do NOT include unused or empty fields for other question types.
 
 Return ONLY the fields relevant to the question:
+- If Cloze Passage (Fill in multiple blanks in passage):
+  {"detected_type": "cloze_passage", "ordered_fill_blanks": ["WordForBlank1", "WordForBlank2", "WordForBlank3"], "reconstructed_passage": "Complete passage with all blanks filled in.", "explanation": "Brief explanation of logical transitions"}
 - If MCQ:
   {"detected_type": "mcq", "mcq_answers": ["exact option text"], "mcq_indices": [0], "explanation": "Short 1-sentence reason."}
 - If Sentence Rearrangement:
-  {"detected_type": "rearrange_sentence", "reordered_token_indices": [0, 1, 2], "reconstructed_sentence": "Full properly ordered sentence."}
+  {"detected_type": "rearrange_sentence", "clause_flow_analysis": "Narrative or syntactic progression", "reconstructed_sentence": "Full properly ordered sentence or story ending with period.", "reordered_token_texts": ["Token to click 1st", "Token to click 2nd", "Token to click 3rd"], "reordered_token_indices": [2, 0, 3, 1], "explanation": "Grammatical or chronological reasoning"}
 - If Choose the Correct Word:
   {"detected_type": "choose_word", "dropdown_selections": [{"dropdown_index": 0, "selected_text": "chosen text"}]}
 - If Writing:
@@ -361,14 +433,24 @@ async function callGeminiAPI(apiKey, model, prompt) {
       errorMsg = "Gemini API Limit Exhausted (HTTP 429): Your API key quota or per-minute rate limit was exceeded. Please wait 60 seconds or use a newly generated API key from Google AI Studio.";
     }
 
-    // Auto-recover if model is not available: detect current models and retry
-    if (errorMsg.includes("is no longer available") || response.status === 404) {
-      console.warn(`[Gemini Solver] Model "${model}" is unavailable. Auto-detecting available models from API key...`);
+    // Auto-recover if model is not available or unsupported: detect available models and retry with alternative
+    const isModelUnavailable = errorMsg.includes("is no longer available") ||
+      errorMsg.includes("not found") ||
+      errorMsg.includes("not supported") ||
+      errorMsg.includes("unsupported") ||
+      response.status === 404 ||
+      (response.status === 400 && (errorMsg.includes("models/") || errorMsg.includes("model")));
+
+    if (isModelUnavailable) {
+      console.warn(`[Gemini Solver] Model "${model}" is unavailable (${errorMsg}). Auto-detecting alternative working model from API key...`);
       try {
         const detection = await autoDetectBestModel(apiKey);
-        if (detection.bestModel && detection.bestModel !== model) {
-          await chrome.storage.local.set({ geminiModel: detection.bestModel });
-          return callGeminiAPI(apiKey, detection.bestModel, prompt);
+        const candidates = detection.sortedModels || detection.models;
+        const alternative = candidates.find(m => m.id !== model)?.id || "gemini-2.0-flash";
+        if (alternative && alternative !== model) {
+          console.log(`[Gemini Solver] Auto-switching from "${model}" to alternative model "${alternative}"...`);
+          await chrome.storage.local.set({ geminiModel: alternative });
+          return callGeminiAPI(apiKey, alternative, prompt);
         }
       } catch (autoErr) {
         console.error("Auto-detect failed:", autoErr);
@@ -581,5 +663,313 @@ async function testApiKey(apiKey, requestedModel = "auto") {
     detectedModel: targetModel,
     detectedModelName: verifiedModel.displayName || targetModel,
     availableModels: detection.models
+  };
+}
+
+// Lightweight test to check if an API key is active or if its rate limit/quota has restored
+async function pingCheckKey(apiKey, currentModel) {
+  if (!apiKey || typeof apiKey !== "string") {
+    return { ok: false, status: "invalid", error: "Missing API Key" };
+  }
+
+  const trimmedKey = apiKey.trim();
+  if (trimmedKey === BURNT_KEY) {
+    return { ok: false, status: "invalid", error: "Burnt or revoked API key" };
+  }
+
+  // Priority candidate models to test
+  const candidateModels = [];
+  if (currentModel && currentModel !== "Auto-Selected" && currentModel !== "auto") {
+    candidateModels.push(currentModel);
+  }
+  candidateModels.push("gemini-3.1-flash-lite-preview", "gemini-2.0-flash", "gemini-1.5-flash");
+  const uniqueCandidates = [...new Set(candidateModels)];
+
+  let isRateLimited = false;
+  let isInvalid = false;
+  let lastError = null;
+
+  for (const modelId of uniqueCandidates) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: "OK" }] }],
+          generationConfig: { maxOutputTokens: 2, temperature: 0.0 }
+        })
+      });
+
+      if (response.ok) {
+        return { ok: true, status: "ready", model: modelId };
+      }
+
+      let errorMsg = `HTTP ${response.status}`;
+      try {
+        const errJson = await response.json();
+        if (errJson.error?.message) errorMsg = errJson.error.message;
+      } catch (_) {}
+
+      const errLower = errorMsg.toLowerCase();
+      if (response.status === 429 || errLower.includes("quota") || errLower.includes("rate limit") || errLower.includes("resource_exhausted") || errLower.includes("exhausted")) {
+        isRateLimited = true;
+        lastError = "Rate limit / quota exceeded (HTTP 429)";
+        break; // Key is rate-limited across models
+      } else if (response.status === 400 || response.status === 403 || errLower.includes("api_key_invalid") || errLower.includes("not valid") || errLower.includes("forbidden")) {
+        isInvalid = true;
+        lastError = errorMsg || "Invalid or unauthorized API key";
+        break;
+      } else if (response.status === 404 || errLower.includes("not found")) {
+        // Model not found or deprecated for this key, try next candidate
+        continue;
+      } else {
+        lastError = errorMsg;
+      }
+    } catch (netErr) {
+      lastError = netErr.message;
+    }
+  }
+
+  // If candidate loop did not succeed and wasn't a confirmed 429 or 400/403, fallback to autoDetectBestModel
+  if (!isRateLimited && !isInvalid) {
+    try {
+      const detection = await autoDetectBestModel(trimmedKey);
+      if (detection.bestModel) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(detection.bestModel)}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: "OK" }] }],
+            generationConfig: { maxOutputTokens: 2, temperature: 0.0 }
+          })
+        });
+
+        if (response.ok) {
+          return { ok: true, status: "ready", model: detection.bestModel };
+        }
+
+        let errorMsg = `HTTP ${response.status}`;
+        try {
+          const errJson = await response.json();
+          if (errJson.error?.message) errorMsg = errJson.error.message;
+        } catch (_) {}
+
+        const errLower = errorMsg.toLowerCase();
+        if (response.status === 429 || errLower.includes("quota") || errLower.includes("rate limit") || errLower.includes("exhausted")) {
+          return { ok: false, status: "exhausted", error: "Rate limit / quota exceeded (HTTP 429)" };
+        }
+        if (response.status === 400 || response.status === 403) {
+          return { ok: false, status: "invalid", error: errorMsg };
+        }
+      }
+    } catch (detectErr) {
+      const detectErrLower = detectErr.message.toLowerCase();
+      if (detectErrLower.includes("quota") || detectErrLower.includes("429")) {
+        return { ok: false, status: "exhausted", error: detectErr.message };
+      }
+      if (detectErrLower.includes("invalid") || detectErrLower.includes("not valid") || detectErrLower.includes("400") || detectErrLower.includes("403")) {
+        return { ok: false, status: "invalid", error: detectErr.message };
+      }
+    }
+  }
+
+  if (isRateLimited) {
+    return { ok: false, status: "exhausted", error: lastError };
+  }
+  if (isInvalid) {
+    return { ok: false, status: "invalid", error: lastError };
+  }
+  return { ok: false, status: "exhausted", error: lastError || "Ping verification failed" };
+}
+
+// Refresh and verify limits for all API keys in the pool
+async function handleRefreshAllKeys() {
+  const settings = await chrome.storage.local.get([
+    "geminiApiKeys",
+    "activeKeyIndex",
+    "geminiApiKey",
+    "geminiModel"
+  ]);
+
+  let keys = Array.isArray(settings.geminiApiKeys) ? [...settings.geminiApiKeys] : [];
+  let activeIndex = typeof settings.activeKeyIndex === "number" ? settings.activeKeyIndex : 0;
+
+  // Filter out burned / empty keys
+  keys = keys.filter(k => {
+    const kStr = typeof k === "string" ? k : k?.key;
+    return kStr && typeof kStr === "string" && kStr.trim() !== BURNT_KEY;
+  });
+
+  // Migrate legacy key if needed
+  if (keys.length === 0 && settings.geminiApiKey && typeof settings.geminiApiKey === "string" && settings.geminiApiKey.trim() !== BURNT_KEY) {
+    keys.push({
+      key: settings.geminiApiKey.trim(),
+      model: settings.geminiModel || "Auto-Selected",
+      status: "active",
+      addedAt: Date.now()
+    });
+    activeIndex = 0;
+  }
+
+  if (keys.length === 0) {
+    throw new Error("No API keys found in pool to refresh. Please add an API key first.");
+  }
+
+  // Normalize key objects
+  keys = keys.map((k, idx) => {
+    if (typeof k === "string") {
+      return { key: k, model: "Auto-Selected", status: (idx === activeIndex ? "active" : "standby"), addedAt: Date.now() };
+    }
+    return { ...k };
+  });
+
+  if (activeIndex >= keys.length) {
+    activeIndex = 0;
+  }
+
+  let restoredCount = 0;
+  let readyCount = 0;
+  let exhaustedCount = 0;
+  let invalidCount = 0;
+
+  // Test all keys in pool concurrently
+  const checkResults = await Promise.all(
+    keys.map(async (keyObj, idx) => {
+      const apiKey = keyObj.key.trim();
+      const prevStatus = keyObj.status;
+      const res = await pingCheckKey(apiKey, keyObj.model);
+      return { idx, prevStatus, res };
+    })
+  );
+
+  // Apply outcomes
+  checkResults.forEach(({ idx, prevStatus, res }) => {
+    const keyObj = keys[idx];
+    keyObj.lastChecked = Date.now();
+
+    if (res.ok) {
+      if (res.model) keyObj.model = res.model;
+      if (prevStatus === "exhausted" || prevStatus === "invalid") {
+        restoredCount++;
+      }
+      keyObj.status = "ready"; // temporary marker for active/standby assignment
+      delete keyObj.lastError;
+      readyCount++;
+    } else {
+      if (res.status === "invalid") {
+        keyObj.status = "invalid";
+        invalidCount++;
+      } else {
+        keyObj.status = "exhausted";
+        exhaustedCount++;
+      }
+      keyObj.lastError = res.error;
+    }
+  });
+
+  // If current active key is not ready, auto-promote the first ready key
+  if (keys[activeIndex]?.status !== "ready") {
+    const firstReadyIdx = keys.findIndex(k => k.status === "ready");
+    if (firstReadyIdx !== -1) {
+      activeIndex = firstReadyIdx;
+    }
+  }
+
+  // Finalize statuses to active or standby
+  keys.forEach((k, idx) => {
+    if (k.status === "ready") {
+      k.status = (idx === activeIndex) ? "active" : "standby";
+    }
+  });
+
+  // Save to storage
+  await chrome.storage.local.set({
+    geminiApiKeys: keys,
+    activeKeyIndex: activeIndex,
+    geminiApiKey: keys[activeIndex] ? keys[activeIndex].key : "",
+    geminiModel: keys[activeIndex] ? keys[activeIndex].model : ""
+  });
+
+  console.log(`[Gemini Solver] Keys limits refreshed: ${readyCount} ready, ${restoredCount} restored, ${exhaustedCount} exhausted, ${invalidCount} invalid.`);
+
+  return {
+    keys,
+    activeKeyIndex: activeIndex,
+    stats: {
+      total: keys.length,
+      restored: restoredCount,
+      ready: readyCount,
+      exhausted: exhaustedCount,
+      invalid: invalidCount
+    }
+  };
+}
+
+// Refresh and verify limits for a single key at specified index
+async function handleRefreshSingleKey(keyIndex) {
+  const settings = await chrome.storage.local.get([
+    "geminiApiKeys",
+    "activeKeyIndex",
+    "geminiApiKey",
+    "geminiModel"
+  ]);
+
+  let keys = Array.isArray(settings.geminiApiKeys) ? [...settings.geminiApiKeys] : [];
+  let activeIndex = typeof settings.activeKeyIndex === "number" ? settings.activeKeyIndex : 0;
+
+  if (keyIndex < 0 || keyIndex >= keys.length) {
+    throw new Error("Invalid API key index.");
+  }
+
+  const keyObj = typeof keys[keyIndex] === "string" 
+    ? { key: keys[keyIndex], model: "Auto-Selected", status: "standby", addedAt: Date.now() }
+    : { ...keys[keyIndex] };
+  keys[keyIndex] = keyObj;
+
+  const prevStatus = keyObj.status;
+  const apiKey = (keyObj.key || "").trim();
+  const res = await pingCheckKey(apiKey, keyObj.model);
+  let wasRestored = false;
+
+  keyObj.lastChecked = Date.now();
+
+  if (res.ok) {
+    if (res.model) keyObj.model = res.model;
+    if (prevStatus === "exhausted" || prevStatus === "invalid") {
+      wasRestored = true;
+    }
+    keyObj.status = (keyIndex === activeIndex) ? "active" : "standby";
+    delete keyObj.lastError;
+
+    // If current active key is exhausted/invalid and this key is healthy, promote this key to active
+    if (keys[activeIndex]?.status === "exhausted" || keys[activeIndex]?.status === "invalid") {
+      activeIndex = keyIndex;
+      keyObj.status = "active";
+    }
+  } else if (res.status === "invalid") {
+    keyObj.status = "invalid";
+    keyObj.lastError = res.error;
+  } else {
+    keyObj.status = "exhausted";
+    keyObj.lastError = res.error;
+  }
+
+  await chrome.storage.local.set({
+    geminiApiKeys: keys,
+    activeKeyIndex: activeIndex,
+    geminiApiKey: keys[activeIndex] ? keys[activeIndex].key : "",
+    geminiModel: keys[activeIndex] ? keys[activeIndex].model : ""
+  });
+
+  return {
+    keys,
+    activeKeyIndex: activeIndex,
+    keyIndex,
+    wasRestored,
+    status: keyObj.status,
+    model: keyObj.model,
+    error: res.error
   };
 }

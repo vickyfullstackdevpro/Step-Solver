@@ -19,6 +19,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const speedSlider = document.getElementById("speed-slider");
   const speedValue = document.getElementById("speed-value");
   const btnOpenPlayground = document.getElementById("btn-open-playground");
+  const btnRefreshKeys = document.getElementById("btn-refresh-keys");
+  const refreshIcon = document.getElementById("refresh-icon");
+  const refreshBtnText = document.getElementById("refresh-btn-text");
 
   // 1. Load Initial State from chrome.storage.local
   const stored = await chrome.storage.local.get([
@@ -121,10 +124,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Render Key Pool UI
   renderKeysList();
 
-  // 3. Add Key Handler
+  // 3. Add Key & Refresh Handlers
   if (btnAddKey) {
     btnAddKey.addEventListener("click", async () => {
       await handleAddKey();
+    });
+  }
+
+  if (btnRefreshKeys) {
+    btnRefreshKeys.addEventListener("click", async () => {
+      await handleRefreshAllKeys();
     });
   }
 
@@ -175,7 +184,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         throw new Error(response?.error || "Key validation failed. Please verify the key in Google AI Studio.");
       }
 
-      const detectedModel = response.detectedModel || "gemini-3.6-flash";
+      const detectedModel = response.detectedModel || "gemini-3.1-flash-lite-preview";
       const isFirstKey = keys.length === 0;
 
       const newKeyObj = {
@@ -250,8 +259,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
 
-    // If pool is empty, render friendly placeholder
+    // If pool is empty, render friendly placeholder and hide refresh button
     if (keys.length === 0) {
+      if (btnRefreshKeys) btnRefreshKeys.style.display = "none";
       const emptyDiv = document.createElement("div");
       emptyDiv.className = "keys-empty-placeholder";
       emptyDiv.innerHTML = `No API keys in pool yet.<br><small style="color: #64748b;">Paste your Google AI Studio API key above and click "+ Add Key".</small>`;
@@ -259,30 +269,41 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
+    if (btnRefreshKeys) {
+      btnRefreshKeys.style.display = "flex";
+    }
+
     // Render each key card
     keys.forEach((keyItem, index) => {
-      const isActive = index === activeIndex;
-      const status = isActive ? "active" : (keyItem.status || "standby");
+      const isCurrentActive = index === activeIndex;
+      const rawStatus = keyItem.status || (isCurrentActive ? "active" : "standby");
+      const itemStatus = (isCurrentActive && rawStatus !== "exhausted" && rawStatus !== "invalid") ? "active" : rawStatus;
 
       const itemEl = document.createElement("div");
-      itemEl.className = `key-item ${status}`;
+      itemEl.className = `key-item ${itemStatus}${isCurrentActive ? " active" : ""}`;
 
       // Mask key for safety: e.g. "AIzaSy...4X9Z"
       const masked = maskKey(keyItem.key);
+
+      let pillText = itemStatus.toUpperCase();
+      if (isCurrentActive && itemStatus !== "active") {
+        pillText = `${itemStatus.toUpperCase()} (ACTIVE)`;
+      }
 
       itemEl.innerHTML = `
         <div class="key-meta">
           <div class="key-row-top">
             <span class="key-num">#${index + 1}</span>
             <span class="key-mask" title="${keyItem.key}">${masked}</span>
-            <span class="key-status-pill ${status}">${status}</span>
+            <span class="key-status-pill ${itemStatus}">${pillText}</span>
           </div>
           <div class="key-row-sub">
             <span class="key-model-tag">✨ ${keyItem.model || "Auto-Selected"}</span>
+            ${keyItem.lastError ? `<span class="key-error-hint" title="${keyItem.lastError}">⚠️ Limit Error</span>` : ""}
           </div>
         </div>
         <div class="key-actions">
-          ${!isActive ? `<button class="btn-key-activate" data-index="${index}" title="Set as current active key">Use Now</button>` : ""}
+          ${!isCurrentActive && itemStatus !== "exhausted" && itemStatus !== "invalid" ? `<button class="btn-key-activate" data-index="${index}" title="Set as current active key">Use Now</button>` : ""}
           <button class="btn-key-delete" data-index="${index}" title="Remove this key">🗑️</button>
         </div>
       `;
@@ -356,6 +377,80 @@ document.addEventListener("DOMContentLoaded", async () => {
     showFeedback(`Key #${index + 1} removed.`, "info");
     renderKeysList();
   }
+
+  // 5. Refresh All API Keys Handler
+  async function handleRefreshAllKeys() {
+    if (keys.length === 0) {
+      showFeedback("No API keys in pool to refresh. Add a key first.", "info");
+      return;
+    }
+
+    setRefreshLoading(true);
+    showFeedback("Testing all API keys to check if limits are restored...", "info");
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: "REFRESH_ALL_KEYS"
+      });
+
+      if (!response || !response.success) {
+        throw new Error(response?.error || "Failed to test API keys.");
+      }
+
+      keys = Array.isArray(response.keys) ? response.keys : keys;
+      if (typeof response.activeKeyIndex === "number") {
+        activeIndex = response.activeKeyIndex;
+      }
+
+      renderKeysList();
+
+      const { total, restored, ready, exhausted, invalid } = response.stats || {};
+      if (restored > 0) {
+        showFeedback(`✓ Limits restored for ${restored} key(s)! (${ready} of ${total} keys ready to use)`, "success");
+      } else if (ready > 0) {
+        showFeedback(`✓ Verified: ${ready} of ${total} key(s) are ready to use.`, "success");
+      } else if (exhausted > 0) {
+        showFeedback(`⚠️ All ${exhausted} key(s) in pool are still rate-limited. Please wait 60s or add a new key.`, "error");
+      } else {
+        showFeedback(`Finished checking ${total} key(s).`, "info");
+      }
+    } catch (err) {
+      showFeedback(`Refresh error: ${err.message}`, "error");
+    } finally {
+      setRefreshLoading(false);
+    }
+  }
+
+  function setRefreshLoading(isLoading) {
+    if (btnRefreshKeys) {
+      btnRefreshKeys.disabled = isLoading;
+    }
+    if (refreshIcon) {
+      if (isLoading) refreshIcon.classList.add("spinning");
+      else refreshIcon.classList.remove("spinning");
+    }
+    if (refreshBtnText) {
+      refreshBtnText.innerText = isLoading ? "Checking All API Limits..." : "Refresh All API Limits";
+    }
+  }
+
+  // Keep popup synced if background rotates keys or updates storage
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "local") {
+      let shouldRerender = false;
+      if (changes.geminiApiKeys) {
+        keys = changes.geminiApiKeys.newValue || [];
+        shouldRerender = true;
+      }
+      if (changes.activeKeyIndex) {
+        activeIndex = changes.activeKeyIndex.newValue || 0;
+        shouldRerender = true;
+      }
+      if (shouldRerender) {
+        renderKeysList();
+      }
+    }
+  });
 
   // Helper to mask key: "AIzaSyDa...71Xa"
   function maskKey(key) {

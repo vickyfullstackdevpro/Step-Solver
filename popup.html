@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gemini Live Solver Settings</title>
+  <title>Step Solver Settings</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -12,19 +12,11 @@
     <header class="popup-header">
       <div class="brand">
         <div class="logo-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="url(#gemini-pop-grad)"/>
-            <defs>
-              <linearGradient id="gemini-pop-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#818cf8"/>
-                <stop offset="100%" stop-color="#38bdf8"/>
-              </linearGradient>
-            </defs>
-          </svg>
+          <img src="icons/icon48.png" width="24" height="24" alt="Step Solver" style="object-fit: contain;">
         </div>
         <div class="brand-text">
-          <h1>Gemini Live</h1>
-          <span class="version-tag">Exam & Quiz Solver v1.0</span>
+          <h1>Step Solver</h1>
+          <span class="version-tag">AI Assessment Solver v1.0</span>
         </div>
       </div>
       <div id="status-badge" class="status-badge disconnected">Key Missing</div>
@@ -71,6 +63,12 @@
         <div id="keys-list" class="keys-list">
           <!-- Populated dynamically by popup.js -->
         </div>
+
+        <!-- Single Refresh Button to Test All API Keys Status -->
+        <button id="btn-refresh-keys" class="btn-refresh-all-keys" title="Check whether rate limits and quotas are restored for all API keys">
+          <span id="refresh-icon" class="refresh-icon">🔄</span>
+          <span id="refresh-btn-text">Refresh All API Limits</span>
+        </button>
 
         <div class="failover-notice">
           <span class="failover-icon">⚡</span>

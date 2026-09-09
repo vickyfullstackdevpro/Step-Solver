@@ -1,6 +1,6 @@
-# 🚀 ExamPilot AI: Live Gemini Exam & Question Solver
+# 🚀 Step Solver: Live AI Assessment & Question Assistant
 
-A high-performance Manifest V3 Chrome Extension powered by Google Gemini AI designed to automatically analyze, solve, and interact with on-screen online assessments, exams, and quizzes in real time.
+A high-performance Manifest V3 browser extension powered by Google Gemini AI designed to automatically analyze, solve, and interact with on-screen online assessments, StepTest, exams, and quizzes in real time.
 
 ---
 
