@@ -78,6 +78,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // Developer Portfolio Link
+  const devPortfolioLink = document.getElementById("dev-portfolio-link");
+  if (devPortfolioLink) {
+    devPortfolioLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      chrome.tabs.create({ url: "https://vignesh-fullstackdev-portfolio.vercel.app/" });
+    });
+  }
+
   // Playground Button
   if (btnOpenPlayground) {
     btnOpenPlayground.addEventListener("click", () => {
@@ -452,12 +461,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // Helper to mask key: "AIzaSyDa...71Xa"
+  // Helper to mask key: "AQ.Ab8...71Xa"
   function maskKey(key) {
     if (!key) return "••••••••••••";
     const trimmed = key.trim();
     if (trimmed.length <= 12) return trimmed;
-    return `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}`;
+    return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`;
   }
 
   function showFeedback(text, type) {
