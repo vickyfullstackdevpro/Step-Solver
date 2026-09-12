@@ -19,146 +19,292 @@
           <span class="version-tag">AI Assessment Solver v1.0.2</span>
         </div>
       </div>
-      <div id="status-badge" class="status-badge disconnected">Key Missing</div>
+      <div id="status-badge" class="status-badge disconnected">Checking...</div>
     </header>
 
-    <!-- Main Settings Form -->
+    <!-- User Account Bar (Shown when authenticated) -->
+    <div id="user-account-bar" class="user-account-bar" style="display: none;">
+      <div class="user-account-info">
+        <span class="user-email-pill" id="user-email-display">user@example.com</span>
+        <span class="device-status-pill" id="device-status-display" title="Strict Single-Device Protection Active">🔒 1 Device</span>
+      </div>
+      <button id="btn-sign-out" class="btn-sign-out" title="Sign Out of Step Solver">Sign Out</button>
+    </div>
+
+    <!-- Main Container Supporting 4 Views -->
     <main class="popup-content">
-      <!-- Master ON/OFF Switch Card -->
-      <section class="settings-card master-power-card">
-        <div class="master-power-row">
-          <div class="master-power-info">
-            <span class="master-power-title">Extension Power</span>
-            <span id="master-power-status" class="master-power-status active">Active & Ready</span>
-          </div>
-          <label class="master-switch">
-            <input type="checkbox" id="master-power-toggle" checked>
-            <span class="master-slider"></span>
-          </label>
-        </div>
-      </section>
 
-      <!-- 30-Minute Free Trial & Lifetime Subscription Status Card -->
-      <section id="subscription-card" class="settings-card subscription-card">
-        <!-- Active Trial View -->
-        <div id="trial-active-view" class="subscription-row">
-          <div class="subscription-info">
-            <div class="subscription-title-row">
-              <span class="subscription-title">⏱️ Free Trial</span>
-              <span id="trial-time-badge" class="trial-badge">30m Left</span>
-            </div>
-            <span class="subscription-sub">Full AI solving unlocked for your first 30 minutes.</span>
+      <!-- ============================================================ -->
+      <!-- VIEW 1: AUTH (Sign In / Sign Up) -->
+      <!-- ============================================================ -->
+      <div id="view-auth" class="popup-view" style="display: none;">
+        <section class="settings-card auth-card">
+          <div class="auth-header-row">
+            <h2 id="auth-title">Welcome to Step Solver</h2>
+            <p id="auth-subtitle">Sign in or create an account to activate your 30-minute free trial.</p>
           </div>
-        </div>
 
-        <!-- Trial Expired Paywall View -->
-        <div id="trial-expired-view" class="trial-expired-container" style="display: none;">
-          <div class="trial-expired-header">
-            <span class="trial-expired-icon">⏳</span>
-            <div class="trial-expired-text">
-              <strong>30-Minute Free Trial Ended</strong>
-              <p>Upgrade to Lifetime Access to continue solving unlimited questions.</p>
+          <!-- Tab Navigation -->
+          <div class="auth-tabs">
+            <button id="tab-sign-in" class="auth-tab active" type="button">Sign In</button>
+            <button id="tab-sign-up" class="auth-tab" type="button">Create Account</button>
+          </div>
+
+          <!-- Auth Form -->
+          <form id="auth-form" class="auth-form" onsubmit="return false;">
+            <!-- Name (Only visible for Sign Up) -->
+            <div id="auth-name-group" class="form-group" style="display: none;">
+              <label for="auth-name">Full Name</label>
+              <input type="text" id="auth-name" class="form-input" placeholder="Your Name" autocomplete="name">
+            </div>
+
+            <!-- Email -->
+            <div class="form-group">
+              <label for="auth-email">Email Address</label>
+              <input type="email" id="auth-email" class="form-input" placeholder="you@example.com" required autocomplete="email">
+            </div>
+
+            <!-- Password -->
+            <div class="form-group">
+              <div class="label-row">
+                <label for="auth-password">Password</label>
+                <span class="range-subtext">(min. 6 characters)</span>
+              </div>
+              <div class="input-with-action">
+                <input type="password" id="auth-password" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+                <button type="button" id="toggle-auth-password" class="icon-action-btn" title="Show / Hide Password">👁️</button>
+              </div>
+            </div>
+
+            <!-- Feedback Message -->
+            <div id="auth-feedback" class="auth-feedback" style="display: none;"></div>
+
+            <!-- Submit Button -->
+            <button type="submit" id="btn-auth-submit" class="btn-auth-primary">
+              <span id="btn-auth-text">Sign In</span>
+            </button>
+          </form>
+
+          <!-- Free Trial Banner in Auth -->
+          <div class="auth-trial-perks">
+            <div class="perk-row">
+              <span class="perk-icon">⏱️</span>
+              <span><strong>30-Minute Free Trial:</strong> Full AI solving unlocked instantly upon email verification.</span>
+            </div>
+            <div class="perk-row">
+              <span class="perk-icon">🔒</span>
+              <span><strong>Single-Device Security:</strong> Account strictly protected to one active device at a time.</span>
             </div>
           </div>
-          
-          <button id="btn-get-lifetime" class="btn-lifetime-upgrade">
-            <span>⭐ Get Lifetime Access</span>
-            <span class="lifetime-price-tag">₹50</span>
+        </section>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- VIEW 2: EMAIL VERIFICATION PENDING -->
+      <!-- ============================================================ -->
+      <div id="view-verify" class="popup-view" style="display: none;">
+        <section class="settings-card verify-card">
+          <div class="verify-icon-wrap">
+            <span class="verify-icon">✉️</span>
+          </div>
+          <h2 class="verify-title">Verify Your Email Address</h2>
+          <p class="verify-desc">
+            We sent a verification link to <strong id="verify-email-display">user@example.com</strong>.<br>
+            Please click the confirmation link in your inbox to start your <strong>30-minute free trial</strong>.
+          </p>
+
+          <div id="verify-feedback" class="auth-feedback" style="display: none;"></div>
+
+          <div class="verify-actions">
+            <button id="btn-check-verified" class="btn-auth-primary">
+              <span>✓ I've Verified My Email</span>
+            </button>
+            <button id="btn-resend-verification" class="btn-auth-secondary">
+              <span>📨 Resend Verification Link</span>
+            </button>
+          </div>
+
+          <div class="verify-footer">
+            <button id="btn-verify-signout" class="link-secondary">Sign out or switch account</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- VIEW 3: SINGLE-DEVICE CONFLICT REVOCATION -->
+      <!-- ============================================================ -->
+      <div id="view-device-conflict" class="popup-view" style="display: none;">
+        <section class="settings-card conflict-card">
+          <div class="conflict-icon-wrap">
+            <span class="conflict-icon">⚠️</span>
+          </div>
+          <h2 class="conflict-title">Account Active On Another Device</h2>
+          <p class="conflict-desc">
+            Step Solver allows <strong>1 active device per account</strong> to prevent unauthorized account sharing. Your session was accessed from another machine or browser.
+          </p>
+
+          <div id="conflict-feedback" class="auth-feedback" style="display: none;"></div>
+
+          <div class="conflict-actions">
+            <button id="btn-claim-device" class="btn-auth-primary btn-claim">
+              <span>🔒 Use On This Device Instead</span>
+            </button>
+            <button id="btn-conflict-signout" class="btn-auth-secondary">
+              <span>Sign Out</span>
+            </button>
+          </div>
+          <span class="conflict-footnote">Claiming this device will automatically log out the other device.</span>
+        </section>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- VIEW 4: MAIN SOLVER SETTINGS DASHBOARD -->
+      <!-- ============================================================ -->
+      <div id="view-main" class="popup-view">
+        <!-- Master ON/OFF Switch Card -->
+        <section class="settings-card master-power-card">
+          <div class="master-power-row">
+            <div class="master-power-info">
+              <span class="master-power-title">Extension Power</span>
+              <span id="master-power-status" class="master-power-status active">Active & Ready</span>
+            </div>
+            <label class="master-switch">
+              <input type="checkbox" id="master-power-toggle" checked>
+              <span class="master-slider"></span>
+            </label>
+          </div>
+        </section>
+
+        <!-- 30-Minute Free Trial & Lifetime Subscription Status Card -->
+        <section id="subscription-card" class="settings-card subscription-card">
+          <!-- Active Trial View -->
+          <div id="trial-active-view" class="subscription-row">
+            <div class="subscription-info">
+              <div class="subscription-title-row">
+                <span class="subscription-title">⏱️ Free Trial</span>
+                <span id="trial-time-badge" class="trial-badge">30m Left</span>
+              </div>
+              <span class="subscription-sub">Full AI solving unlocked for your first 30 minutes.</span>
+            </div>
+          </div>
+
+          <!-- Trial Expired Paywall View -->
+          <div id="trial-expired-view" class="trial-expired-container" style="display: none;">
+            <div class="trial-expired-header">
+              <span class="trial-expired-icon">⏳</span>
+              <div class="trial-expired-text">
+                <strong>30-Minute Free Trial Ended</strong>
+                <p>Upgrade to Lifetime Access to continue solving unlimited questions.</p>
+              </div>
+            </div>
+            
+            <button id="btn-get-lifetime" class="btn-lifetime-upgrade">
+              <span>⭐ Get Lifetime Access</span>
+              <span class="lifetime-price-tag">₹50</span>
+            </button>
+
+            <!-- Live Payment Status Polling Indicator -->
+            <div id="payment-polling-status" class="payment-polling-status" style="display: none;">
+              <span class="polling-spinner">🔄</span>
+              <span id="payment-polling-text">Opening Razorpay checkout in new tab...</span>
+            </div>
+            
+            <div class="license-key-toggle-row">
+              <button id="btn-toggle-license-input" class="link-license-toggle">Already have an Activation Key?</button>
+            </div>
+
+            <div id="license-input-container" class="license-input-container" style="display: none;">
+              <div class="license-input-row">
+                <input type="text" id="license-key-input" placeholder="Enter Lifetime Key (STEP-...)" spellcheck="false" autocomplete="off">
+                <button id="btn-activate-license" class="btn-activate-key">Activate</button>
+              </div>
+              <div id="license-feedback" class="license-feedback"></div>
+            </div>
+          </div>
+
+          <!-- Lifetime Active View -->
+          <div id="lifetime-active-view" class="lifetime-active-container" style="display: none;">
+            <div class="lifetime-active-badge-row">
+              <span class="lifetime-star-icon">⭐</span>
+              <span class="lifetime-active-title">Lifetime Access Active</span>
+            </div>
+            <span class="lifetime-active-sub">Unlimited AI questions & model failover unlocked forever.</span>
+          </div>
+        </section>
+
+        <!-- API Key Pool Card (Max 10 with Auto-Failover) -->
+        <section class="settings-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <label for="new-key-input">API Key Pool</label>
+              <span id="key-count-badge" class="key-count-badge">0 / 10</span>
+            </div>
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" class="link-helper">Get Free Key ↗</a>
+          </div>
+
+          <div class="add-key-row">
+            <div class="input-with-action">
+              <input type="password" id="new-key-input" placeholder="Paste Gemini API Key (AIzaSy...)" spellcheck="false" autocomplete="off">
+              <button id="toggle-key-visibility" class="icon-action-btn" title="Show / Hide Key">👁️</button>
+            </div>
+            <button id="btn-add-key" class="btn-primary">
+              <span id="btn-add-text">+ Add Key</span>
+            </button>
+          </div>
+          <div id="api-status-msg" class="api-feedback"></div>
+
+          <!-- Keys List Container -->
+          <div id="keys-list" class="keys-list">
+            <!-- Populated dynamically by popup.js -->
+          </div>
+
+          <!-- Single Refresh Button to Test All API Keys Status -->
+          <button id="btn-refresh-keys" class="btn-refresh-all-keys" title="Check whether rate limits and quotas are restored for all API keys">
+            <span id="refresh-icon" class="refresh-icon">🔄</span>
+            <span id="refresh-btn-text">Refresh All API Limits</span>
           </button>
-          
-          <div class="license-key-toggle-row">
-            <button id="btn-toggle-license-input" class="link-license-toggle">Already have an Activation Key?</button>
-          </div>
 
-          <div id="license-input-container" class="license-input-container" style="display: none;">
-            <div class="license-input-row">
-              <input type="text" id="license-key-input" placeholder="Enter Lifetime Key (STEP-...)" spellcheck="false" autocomplete="off">
-              <button id="btn-activate-license" class="btn-activate-key">Activate</button>
+          <div class="failover-notice">
+            <span class="failover-icon">⚡</span>
+            <span><strong>Auto-Failover Active:</strong> If one key's token limit exhausts, the solver seamlessly switches to the next available key (up to 10 keys).</span>
+          </div>
+        </section>
+
+        <!-- Preferences & Auto Model -->
+        <section class="settings-card">
+          <div class="model-auto-indicator">
+            <div class="model-indicator-header">
+              <span class="indicator-title">✨ AI Model</span>
+              <span id="active-model-name" class="model-pill">Auto-Selected</span>
             </div>
-            <div id="license-feedback" class="license-feedback"></div>
+            <span class="model-indicator-sub">Automatically determines the optimal Flash model for the active key.</span>
           </div>
-        </div>
 
-        <!-- Lifetime Active View -->
-        <div id="lifetime-active-view" class="lifetime-active-container" style="display: none;">
-          <div class="lifetime-active-badge-row">
-            <span class="lifetime-star-icon">⭐</span>
-            <span class="lifetime-active-title">Lifetime Access Active</span>
+          <div class="form-group" style="margin-top: 6px;">
+            <div class="label-row">
+              <label for="speed-slider">Interaction Pacing</label>
+              <span id="speed-value" class="value-display">250 ms</span>
+            </div>
+            <input type="range" id="speed-slider" min="0" max="800" step="50" value="250" class="form-range">
+            <span class="range-subtext">Adds natural delay between clicks/keystrokes</span>
           </div>
-          <span class="lifetime-active-sub">Unlimited AI questions & model failover unlocked forever.</span>
-        </div>
-      </section>
+        </section>
 
-      <!-- API Key Pool Card (Max 10 with Auto-Failover) -->
-      <section class="settings-card">
-        <div class="card-header">
-          <div class="card-title-group">
-            <label for="new-key-input">API Key Pool</label>
-            <span id="key-count-badge" class="key-count-badge">0 / 10</span>
+        <!-- Footer & Developer Attribution -->
+        <footer class="footer-actions">
+          <div class="keyboard-hints">
+            <span>Shortcut: <strong>Alt + S</strong> (Solve) • <strong>Alt + H</strong> (HUD)</span>
           </div>
-          <a href="https://aistudio.google.com/app/apikey" target="_blank" class="link-helper">Get Free Key ↗</a>
-        </div>
-
-        <div class="add-key-row">
-          <div class="input-with-action">
-            <input type="password" id="new-key-input" placeholder="Paste Gemini API Key (AIzaSy...)" spellcheck="false" autocomplete="off">
-            <button id="toggle-key-visibility" class="icon-action-btn" title="Show / Hide Key">👁️</button>
+          <div class="developer-credit">
+            <span>Developed by <a href="https://vignesh-fullstackdev-portfolio.vercel.app/" target="_blank" rel="noopener noreferrer" id="dev-portfolio-link" class="dev-portfolio-link">Vignesh</a></span>
           </div>
-          <button id="btn-add-key" class="btn-primary">
-            <span id="btn-add-text">+ Add Key</span>
-          </button>
-        </div>
-        <div id="api-status-msg" class="api-feedback"></div>
+        </footer>
+      </div>
 
-        <!-- Keys List Container -->
-        <div id="keys-list" class="keys-list">
-          <!-- Populated dynamically by popup.js -->
-        </div>
-
-        <!-- Single Refresh Button to Test All API Keys Status -->
-        <button id="btn-refresh-keys" class="btn-refresh-all-keys" title="Check whether rate limits and quotas are restored for all API keys">
-          <span id="refresh-icon" class="refresh-icon">🔄</span>
-          <span id="refresh-btn-text">Refresh All API Limits</span>
-        </button>
-
-        <div class="failover-notice">
-          <span class="failover-icon">⚡</span>
-          <span><strong>Auto-Failover Active:</strong> If one key's token limit exhausts, the solver seamlessly switches to the next available key (up to 10 keys).</span>
-        </div>
-      </section>
-
-      <!-- Preferences & Auto Model -->
-      <section class="settings-card">
-        <div class="model-auto-indicator">
-          <div class="model-indicator-header">
-            <span class="indicator-title">✨ AI Model</span>
-            <span id="active-model-name" class="model-pill">Auto-Selected</span>
-          </div>
-          <span class="model-indicator-sub">Automatically determines the optimal Flash model for the active key.</span>
-        </div>
-
-        <div class="form-group" style="margin-top: 6px;">
-          <div class="label-row">
-            <label for="speed-slider">Interaction Pacing</label>
-            <span id="speed-value" class="value-display">250 ms</span>
-          </div>
-          <input type="range" id="speed-slider" min="0" max="800" step="50" value="250" class="form-range">
-          <span class="range-subtext">Adds natural delay between clicks/keystrokes</span>
-        </div>
-      </section>
-
-      <!-- Footer & Developer Attribution -->
-      <footer class="footer-actions">
-        <div class="keyboard-hints">
-          <span>Shortcut: <strong>Alt + S</strong> (Solve) • <strong>Alt + H</strong> (HUD)</span>
-        </div>
-        <div class="developer-credit">
-          <span>Developed by <a href="https://vignesh-fullstackdev-portfolio.vercel.app/" target="_blank" rel="noopener noreferrer" id="dev-portfolio-link" class="dev-portfolio-link">Vignesh</a></span>
-        </div>
-      </footer>
     </main>
   </div>
 
+  <script src="auth.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

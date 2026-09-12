@@ -1,11 +1,48 @@
-// popup.js - Multi-API Key Pool (Max 10) & Automatic AI Model Detection
+// popup.js - Multi-API Key Pool, Supabase Auth, Single-Device Lock & Razorpay Lifetime Engine
 
 document.addEventListener("DOMContentLoaded", async () => {
   const MAX_KEYS = 10;
   const BURNT_KEY = "AQ.Ab8RN6I1C1o7hEEyqfwMJUFw1TdSg-kRieVIS06703505QTCrQ";
 
-  // Elements
+  // Elements - Header & Views
   const statusBadge = document.getElementById("status-badge");
+  const userAccountBar = document.getElementById("user-account-bar");
+  const userEmailDisplay = document.getElementById("user-email-display");
+  const btnSignOut = document.getElementById("btn-sign-out");
+
+  const viewAuth = document.getElementById("view-auth");
+  const viewVerify = document.getElementById("view-verify");
+  const viewDeviceConflict = document.getElementById("view-device-conflict");
+  const viewMain = document.getElementById("view-main");
+
+  // Elements - Auth View
+  const authTitle = document.getElementById("auth-title");
+  const authSubtitle = document.getElementById("auth-subtitle");
+  const tabSignIn = document.getElementById("tab-sign-in");
+  const tabSignUp = document.getElementById("tab-sign-up");
+  const authForm = document.getElementById("auth-form");
+  const authNameGroup = document.getElementById("auth-name-group");
+  const authNameInput = document.getElementById("auth-name");
+  const authEmailInput = document.getElementById("auth-email");
+  const authPasswordInput = document.getElementById("auth-password");
+  const toggleAuthPasswordBtn = document.getElementById("toggle-auth-password");
+  const btnAuthSubmit = document.getElementById("btn-auth-submit");
+  const btnAuthText = document.getElementById("btn-auth-text");
+  const authFeedback = document.getElementById("auth-feedback");
+
+  // Elements - Verify View
+  const verifyEmailDisplay = document.getElementById("verify-email-display");
+  const verifyFeedback = document.getElementById("verify-feedback");
+  const btnCheckVerified = document.getElementById("btn-check-verified");
+  const btnResendVerification = document.getElementById("btn-resend-verification");
+  const btnVerifySignout = document.getElementById("btn-verify-signout");
+
+  // Elements - Conflict View
+  const conflictFeedback = document.getElementById("conflict-feedback");
+  const btnClaimDevice = document.getElementById("btn-claim-device");
+  const btnConflictSignout = document.getElementById("btn-conflict-signout");
+
+  // Elements - Main Settings Dashboard
   const masterPowerToggle = document.getElementById("master-power-toggle");
   const masterPowerStatus = document.getElementById("master-power-status");
   const keyCountBadge = document.getElementById("key-count-badge");
@@ -18,92 +55,320 @@ document.addEventListener("DOMContentLoaded", async () => {
   const activeModelName = document.getElementById("active-model-name");
   const speedSlider = document.getElementById("speed-slider");
   const speedValue = document.getElementById("speed-value");
-  const btnOpenPlayground = document.getElementById("btn-open-playground");
   const btnRefreshKeys = document.getElementById("btn-refresh-keys");
   const refreshIcon = document.getElementById("refresh-icon");
   const refreshBtnText = document.getElementById("refresh-btn-text");
 
-  // Subscription / Trial Elements
+  // Elements - Subscription / Trial / Razorpay
   const trialActiveView = document.getElementById("trial-active-view");
   const trialTimeBadge = document.getElementById("trial-time-badge");
   const trialExpiredView = document.getElementById("trial-expired-view");
   const lifetimeActiveView = document.getElementById("lifetime-active-view");
   const btnGetLifetime = document.getElementById("btn-get-lifetime");
+  const paymentPollingStatus = document.getElementById("payment-polling-status");
+  const paymentPollingText = document.getElementById("payment-polling-text");
   const btnToggleLicenseInput = document.getElementById("btn-toggle-license-input");
   const licenseInputContainer = document.getElementById("license-input-container");
   const licenseKeyInput = document.getElementById("license-key-input");
   const btnActivateLicense = document.getElementById("btn-activate-license");
   const licenseFeedback = document.getElementById("license-feedback");
 
-  // 1. Load Initial State from chrome.storage.local
-  const stored = await chrome.storage.local.get([
-    "geminiApiKeys",
-    "activeKeyIndex",
-    "geminiApiKey",
-    "geminiModel",
-    "typingDelayMs",
-    "extensionEnabled"
-  ]);
+  let authMode = "signin"; // "signin" | "signup"
+  let paymentPollingTimer = null;
+  let countdownInterval = null;
 
-  // Master ON/OFF Power Toggle
-  const isEnabled = stored.extensionEnabled !== false;
-  if (masterPowerToggle) {
-    masterPowerToggle.checked = isEnabled;
-    updatePowerUI(isEnabled);
+  // -------------------------------------------------------------
+  // 1. View Controller
+  // -------------------------------------------------------------
+  function switchView(viewName) {
+    if (viewAuth) viewAuth.style.display = viewName === "auth" ? "flex" : "none";
+    if (viewVerify) viewVerify.style.display = viewName === "verify" ? "flex" : "none";
+    if (viewDeviceConflict) viewDeviceConflict.style.display = viewName === "conflict" ? "flex" : "none";
+    if (viewMain) viewMain.style.display = viewName === "main" ? "flex" : "none";
 
-    masterPowerToggle.addEventListener("change", async (e) => {
-      const enabled = e.target.checked;
-      updatePowerUI(enabled);
-      await chrome.storage.local.set({ extensionEnabled: enabled });
-      // Broadcast state to all tabs
-      chrome.tabs.query({}, (tabs) => {
-        tabs.forEach((tab) => {
-          chrome.tabs.sendMessage(tab.id, {
-            action: "EXTENSION_POWER_TOGGLED",
-            enabled: enabled
-          }).catch(() => {});
-        });
-      });
-    });
-  }
-
-  function updatePowerUI(enabled) {
-    if (!masterPowerStatus) return;
-    if (enabled) {
-      masterPowerStatus.innerText = "Active & Ready";
-      masterPowerStatus.className = "master-power-status active";
-    } else {
-      masterPowerStatus.innerText = "Paused (Disabled)";
-      masterPowerStatus.className = "master-power-status disabled";
+    if (userAccountBar) {
+      userAccountBar.style.display = (viewName === "main" || viewName === "conflict") ? "flex" : "none";
     }
   }
 
-  // Pacing Slider
-  if (stored.typingDelayMs !== undefined && speedSlider && speedValue) {
-    speedSlider.value = stored.typingDelayMs;
-    speedValue.innerText = `${stored.typingDelayMs} ms`;
+  // -------------------------------------------------------------
+  // 2. Auth & Single-Device State Evaluator
+  // -------------------------------------------------------------
+  async function checkAuthAndDeviceState() {
+    try {
+      const session = await StepAuth.getStoredSession();
+      if (!session || !session.access_token) {
+        switchView("auth");
+        updateHeaderStatus("Auth Required", "disconnected");
+        return;
+      }
+
+      // Check user email verification status if Supabase enforces confirmation
+      const user = session.user;
+      const userEmail = user?.email || "";
+      if (userEmailDisplay) userEmailDisplay.innerText = userEmail;
+      if (verifyEmailDisplay) verifyEmailDisplay.innerText = userEmail;
+
+      // Single-Device Concurrency Verification
+      const concurrency = await StepAuth.verifyDeviceConcurrency();
+
+      if (!concurrency.isAuthenticated) {
+        switchView("auth");
+        updateHeaderStatus("Auth Required", "disconnected");
+        return;
+      }
+
+      if (concurrency.isDeviceActive === false) {
+        switchView("conflict");
+        updateHeaderStatus("Conflict", "disconnected");
+        return;
+      }
+
+      // Concurrency verified and active on this device!
+      switchView("main");
+      updateHeaderStatus("Ready", "connected");
+
+      // Check and update subscription & trial status
+      await updateSubscriptionUI();
+
+    } catch (err) {
+      console.warn("[Popup] Auth check error:", err);
+      switchView("auth");
+      updateHeaderStatus("Error", "disconnected");
+    }
   }
-  if (speedSlider) {
-    speedSlider.addEventListener("input", (e) => {
-      if (speedValue) speedValue.innerText = `${e.target.value} ms`;
-      chrome.storage.local.set({ typingDelayMs: parseInt(e.target.value, 10) });
+
+  function updateHeaderStatus(text, type) {
+    if (!statusBadge) return;
+    statusBadge.innerText = text;
+    statusBadge.className = `status-badge ${type}`;
+  }
+
+  // -------------------------------------------------------------
+  // 3. Auth Form Event Handlers (Sign In / Sign Up)
+  // -------------------------------------------------------------
+  if (tabSignIn && tabSignUp) {
+    tabSignIn.addEventListener("click", () => setAuthMode("signin"));
+    tabSignUp.addEventListener("click", () => setAuthMode("signup"));
+  }
+
+  function setAuthMode(mode) {
+    authMode = mode;
+    clearAuthFeedback();
+    if (mode === "signin") {
+      tabSignIn.classList.add("active");
+      tabSignUp.classList.remove("active");
+      if (authNameGroup) authNameGroup.style.display = "none";
+      if (authTitle) authTitle.innerText = "Welcome to Step Solver";
+      if (authSubtitle) authSubtitle.innerText = "Sign in to access your AI solver and active subscription.";
+      if (btnAuthText) btnAuthText.innerText = "Sign In";
+    } else {
+      tabSignUp.classList.add("active");
+      tabSignIn.classList.remove("active");
+      if (authNameGroup) authNameGroup.style.display = "block";
+      if (authTitle) authTitle.innerText = "Create Your Account";
+      if (authSubtitle) authSubtitle.innerText = "Get a 30-minute free trial with full AI solving unlocked.";
+      if (btnAuthText) btnAuthText.innerText = "Create Account & Start Trial";
+    }
+  }
+
+  if (toggleAuthPasswordBtn && authPasswordInput) {
+    toggleAuthPasswordBtn.addEventListener("click", () => {
+      const isPassword = authPasswordInput.type === "password";
+      authPasswordInput.type = isPassword ? "text" : "password";
+      toggleAuthPasswordBtn.innerText = isPassword ? "🙈" : "👁️";
     });
   }
 
-  // Developer Portfolio Link
-  const devPortfolioLink = document.getElementById("dev-portfolio-link");
-  if (devPortfolioLink) {
-    devPortfolioLink.addEventListener("click", (e) => {
+  if (authForm) {
+    authForm.addEventListener("submit", async (e) => {
       e.preventDefault();
-      chrome.tabs.create({ url: "https://vignesh-fullstackdev-portfolio.vercel.app/" });
+      const email = (authEmailInput?.value || "").trim();
+      const password = (authPasswordInput?.value || "").trim();
+      const fullName = (authNameInput?.value || "").trim();
+
+      if (!email || !password) {
+        showAuthFeedback("Please provide both email and password.", "error");
+        return;
+      }
+
+      if (password.length < 6) {
+        showAuthFeedback("Password must be at least 6 characters.", "error");
+        return;
+      }
+
+      setAuthButtonLoading(true);
+      clearAuthFeedback();
+
+      if (authMode === "signin") {
+        try {
+          showAuthFeedback("Signing in and checking device session...", "info");
+          await StepAuth.authSignIn(email, password);
+          showAuthFeedback("✓ Signed in successfully!", "success");
+          setTimeout(async () => {
+            await checkAuthAndDeviceState();
+          }, 600);
+        } catch (err) {
+          showAuthFeedback(err.message || "Failed to sign in. Please check credentials.", "error");
+        } finally {
+          setAuthButtonLoading(false);
+        }
+      } else {
+        try {
+          showAuthFeedback("Creating account & sending confirmation notice...", "info");
+          const data = await StepAuth.authSignUp(email, password, fullName);
+          
+          if (verifyEmailDisplay) verifyEmailDisplay.innerText = email;
+
+          // If user object indicates email confirmation is pending
+          if (data.user && !data.session) {
+            switchView("verify");
+          } else {
+            // Auto-confirmed or direct session
+            showAuthFeedback("✓ Account created successfully! Logging you in...", "success");
+            await StepAuth.authSignIn(email, password);
+            setTimeout(async () => {
+              await checkAuthAndDeviceState();
+            }, 800);
+          }
+        } catch (err) {
+          showAuthFeedback(err.message || "Sign up failed. Please try again.", "error");
+        } finally {
+          setAuthButtonLoading(false);
+        }
+      }
+    });
+  }
+
+  function setAuthButtonLoading(isLoading) {
+    if (!btnAuthSubmit || !btnAuthText) return;
+    btnAuthSubmit.disabled = isLoading;
+    btnAuthText.innerText = isLoading ? "Processing..." : (authMode === "signin" ? "Sign In" : "Create Account & Start Trial");
+  }
+
+  function showAuthFeedback(text, type) {
+    if (!authFeedback) return;
+    authFeedback.innerText = text;
+    authFeedback.className = `auth-feedback ${type}`;
+    authFeedback.style.display = "block";
+  }
+
+  function clearAuthFeedback() {
+    if (!authFeedback) return;
+    authFeedback.innerText = "";
+    authFeedback.style.display = "none";
+  }
+
+  // -------------------------------------------------------------
+  // 4. Verification View Event Handlers
+  // -------------------------------------------------------------
+  if (btnCheckVerified) {
+    btnCheckVerified.addEventListener("click", async () => {
+      btnCheckVerified.disabled = true;
+      btnCheckVerified.innerText = "Verifying...";
+      try {
+        const session = await StepAuth.getStoredSession();
+        if (session) {
+          await checkAuthAndDeviceState();
+        } else {
+          // If no stored session, ask user to log in to complete verification check
+          showVerifyFeedback("Please sign in to complete email activation.", "info");
+          setTimeout(() => switchView("auth"), 1200);
+        }
+      } catch (err) {
+        showVerifyFeedback("Email not verified yet. Please check your inbox and click the link.", "error");
+      } finally {
+        btnCheckVerified.disabled = false;
+        btnCheckVerified.innerText = "✓ I've Verified My Email";
+      }
+    });
+  }
+
+  if (btnResendVerification) {
+    btnResendVerification.addEventListener("click", async () => {
+      const email = verifyEmailDisplay?.innerText || authEmailInput?.value;
+      if (!email) {
+        showVerifyFeedback("Please enter your email to resend link.", "error");
+        return;
+      }
+      btnResendVerification.disabled = true;
+      btnResendVerification.innerText = "Sending...";
+      try {
+        await StepAuth.requestEmailConfirmationResend(email);
+        showVerifyFeedback("✓ Confirmation email sent! Please check your spam/inbox.", "success");
+      } catch (err) {
+        showVerifyFeedback(err.message || "Failed to resend email.", "error");
+      } finally {
+        btnResendVerification.disabled = false;
+        btnResendVerification.innerText = "📨 Resend Verification Link";
+      }
+    });
+  }
+
+  if (btnVerifySignout) {
+    btnVerifySignout.addEventListener("click", async () => {
+      await StepAuth.authSignOut();
+      switchView("auth");
+    });
+  }
+
+  function showVerifyFeedback(text, type) {
+    if (!verifyFeedback) return;
+    verifyFeedback.innerText = text;
+    verifyFeedback.className = `auth-feedback ${type}`;
+    verifyFeedback.style.display = "block";
+  }
+
+  // -------------------------------------------------------------
+  // 5. Single-Device Concurrency Conflict Handlers
+  // -------------------------------------------------------------
+  if (btnClaimDevice) {
+    btnClaimDevice.addEventListener("click", async () => {
+      btnClaimDevice.disabled = true;
+      btnClaimDevice.innerText = "Claiming Device...";
+      if (conflictFeedback) conflictFeedback.style.display = "none";
+
+      try {
+        await StepAuth.claimThisDevice();
+        if (conflictFeedback) {
+          conflictFeedback.innerText = "✓ This device is now registered as your active session!";
+          conflictFeedback.className = "auth-feedback success";
+          conflictFeedback.style.display = "block";
+        }
+        setTimeout(async () => {
+          await checkAuthAndDeviceState();
+        }, 800);
+      } catch (err) {
+        if (conflictFeedback) {
+          conflictFeedback.innerText = err.message || "Failed to claim device lock.";
+          conflictFeedback.className = "auth-feedback error";
+          conflictFeedback.style.display = "block";
+        }
+      } finally {
+        btnClaimDevice.disabled = false;
+        btnClaimDevice.innerText = "🔒 Use On This Device Instead";
+      }
+    });
+  }
+
+  if (btnConflictSignout) {
+    btnConflictSignout.addEventListener("click", async () => {
+      await StepAuth.authSignOut();
+      switchView("auth");
+    });
+  }
+
+  if (btnSignOut) {
+    btnSignOut.addEventListener("click", async () => {
+      await StepAuth.authSignOut();
+      switchView("auth");
+      updateHeaderStatus("Auth Required", "disconnected");
     });
   }
 
   // -------------------------------------------------------------
-  // Subscription & 30-Min Free Trial Handler
+  // 6. Subscription, 30-Min Trial & Razorpay ₹50 Payment Engine
   // -------------------------------------------------------------
-  let countdownInterval = null;
-
   async function updateSubscriptionUI() {
     try {
       const response = await chrome.runtime.sendMessage({ action: "GET_SUBSCRIPTION_STATUS" });
@@ -114,15 +379,16 @@ document.addEventListener("DOMContentLoaded", async () => {
         countdownInterval = null;
       }
 
-      // Case 1: Lifetime Unlocked
+      // Case 1: Lifetime Access Unlocked
       if (response.isLifetime) {
         if (trialActiveView) trialActiveView.style.display = "none";
         if (trialExpiredView) trialExpiredView.style.display = "none";
         if (lifetimeActiveView) lifetimeActiveView.style.display = "flex";
+        if (paymentPollingStatus) paymentPollingStatus.style.display = "none";
         return;
       }
 
-      // Case 2: Trial Expired
+      // Case 2: Trial Expired -> Show ₹50 Paywall
       if (response.isTrialExpired) {
         if (trialActiveView) trialActiveView.style.display = "none";
         if (trialExpiredView) trialExpiredView.style.display = "flex";
@@ -130,7 +396,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
-      // Case 3: Free Trial Active (< 30 minutes)
+      // Case 3: Free Trial Active (< 30 Minutes)
       if (trialActiveView) trialActiveView.style.display = "flex";
       if (trialExpiredView) trialExpiredView.style.display = "none";
       if (lifetimeActiveView) lifetimeActiveView.style.display = "none";
@@ -170,17 +436,72 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Initialize Subscription UI
-  updateSubscriptionUI();
-
-  // Upgrade button (opens payment / portfolio page)
+  // Razorpay Hosted Payment Flow
   if (btnGetLifetime) {
-    btnGetLifetime.addEventListener("click", () => {
-      chrome.tabs.create({ url: "https://vignesh-fullstackdev-portfolio.vercel.app/" });
+    btnGetLifetime.addEventListener("click", async () => {
+      btnGetLifetime.disabled = true;
+      showPaymentPolling("Initializing Razorpay checkout...");
+
+      try {
+        const session = await StepAuth.getStoredSession();
+        const userEmail = session?.user?.email || "customer@step-solver.com";
+        const userName = session?.user?.user_metadata?.full_name || "Step Solver User";
+
+        const paymentData = await StepAuth.createRazorpayPaymentLink(userEmail, userName);
+        
+        // Open Razorpay hosted payment link in a new browser tab
+        chrome.tabs.create({ url: paymentData.paymentUrl });
+
+        showPaymentPolling("Waiting for payment completion in new tab...");
+
+        // Start polling Razorpay payment status
+        if (paymentPollingTimer) clearInterval(paymentPollingTimer);
+        let pollAttempts = 0;
+        const maxPollAttempts = 80; // Poll for up to 4 minutes
+
+        paymentPollingTimer = setInterval(async () => {
+          pollAttempts++;
+          try {
+            const check = await StepAuth.verifyRazorpayPaymentLink(paymentData.paymentLinkId);
+            if (check.isPaid) {
+              clearInterval(paymentPollingTimer);
+              paymentPollingTimer = null;
+              showPaymentPolling("✓ Payment confirmed! Lifetime Access Activated!", true);
+              setTimeout(() => {
+                updateSubscriptionUI();
+              }, 1200);
+            } else if (pollAttempts >= maxPollAttempts) {
+              clearInterval(paymentPollingTimer);
+              paymentPollingTimer = null;
+              hidePaymentPolling();
+              btnGetLifetime.disabled = false;
+            }
+          } catch (_) {}
+        }, 3000);
+
+      } catch (err) {
+        showPaymentPolling("Payment error: " + (err.message || "Failed to initialize payment link."));
+        setTimeout(hidePaymentPolling, 4000);
+        btnGetLifetime.disabled = false;
+      }
     });
   }
 
-  // Toggle activation key input visibility
+  function showPaymentPolling(text, isSuccess = false) {
+    if (!paymentPollingStatus || !paymentPollingText) return;
+    paymentPollingText.innerText = text;
+    paymentPollingStatus.style.display = "flex";
+    if (isSuccess) {
+      paymentPollingStatus.style.background = "rgba(16, 185, 129, 0.2)";
+      paymentPollingStatus.style.borderColor = "rgba(16, 185, 129, 0.6)";
+    }
+  }
+
+  function hidePaymentPolling() {
+    if (paymentPollingStatus) paymentPollingStatus.style.display = "none";
+  }
+
+  // Backup Manual Activation Key Toggle & Trigger
   if (btnToggleLicenseInput && licenseInputContainer) {
     btnToggleLicenseInput.addEventListener("click", () => {
       const isHidden = licenseInputContainer.style.display === "none";
@@ -191,7 +512,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Activate license key
   if (btnActivateLicense && licenseKeyInput) {
     btnActivateLicense.addEventListener("click", async () => {
       const rawKey = licenseKeyInput.value.trim();
@@ -235,14 +555,71 @@ document.addEventListener("DOMContentLoaded", async () => {
     licenseFeedback.style.display = "block";
   }
 
-  // Playground Button
-  if (btnOpenPlayground) {
-    btnOpenPlayground.addEventListener("click", () => {
-      chrome.tabs.create({ url: chrome.runtime.getURL("playground.html") });
+  // -------------------------------------------------------------
+  // 7. General Settings: Master Power, Pacing, Developer Link
+  // -------------------------------------------------------------
+  const stored = await chrome.storage.local.get([
+    "geminiApiKeys",
+    "activeKeyIndex",
+    "geminiApiKey",
+    "geminiModel",
+    "typingDelayMs",
+    "extensionEnabled"
+  ]);
+
+  const isEnabled = stored.extensionEnabled !== false;
+  if (masterPowerToggle) {
+    masterPowerToggle.checked = isEnabled;
+    updatePowerUI(isEnabled);
+
+    masterPowerToggle.addEventListener("change", async (e) => {
+      const enabled = e.target.checked;
+      updatePowerUI(enabled);
+      await chrome.storage.local.set({ extensionEnabled: enabled });
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          chrome.tabs.sendMessage(tab.id, {
+            action: "EXTENSION_POWER_TOGGLED",
+            enabled: enabled
+          }).catch(() => {});
+        });
+      });
     });
   }
 
-  // Toggle Visibility of New Key Input
+  function updatePowerUI(enabled) {
+    if (!masterPowerStatus) return;
+    if (enabled) {
+      masterPowerStatus.innerText = "Active & Ready";
+      masterPowerStatus.className = "master-power-status active";
+    } else {
+      masterPowerStatus.innerText = "Paused (Disabled)";
+      masterPowerStatus.className = "master-power-status disabled";
+    }
+  }
+
+  if (stored.typingDelayMs !== undefined && speedSlider && speedValue) {
+    speedSlider.value = stored.typingDelayMs;
+    speedValue.innerText = `${stored.typingDelayMs} ms`;
+  }
+  if (speedSlider) {
+    speedSlider.addEventListener("input", (e) => {
+      if (speedValue) speedValue.innerText = `${e.target.value} ms`;
+      chrome.storage.local.set({ typingDelayMs: parseInt(e.target.value, 10) });
+    });
+  }
+
+  const devPortfolioLink = document.getElementById("dev-portfolio-link");
+  if (devPortfolioLink) {
+    devPortfolioLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      chrome.tabs.create({ url: "https://vignesh-fullstackdev-portfolio.vercel.app/" });
+    });
+  }
+
+  // -------------------------------------------------------------
+  // 8. Gemini API Key Pool Management (Max 10)
+  // -------------------------------------------------------------
   if (toggleKeyVisibilityBtn && newKeyInput) {
     toggleKeyVisibilityBtn.addEventListener("click", () => {
       const isPassword = newKeyInput.type === "password";
@@ -251,14 +628,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // 2. Initialize Key Pool & Migrate Legacy Key
   let keys = Array.isArray(stored.geminiApiKeys) ? [...stored.geminiApiKeys] : [];
   let activeIndex = typeof stored.activeKeyIndex === "number" ? stored.activeKeyIndex : 0;
 
-  // Filter out burned / invalid keys
   keys = keys.filter(k => k && k.key && k.key.trim() !== BURNT_KEY);
 
-  // Backward compatibility: If no key pool exists but legacy geminiApiKey does, migrate it
   if (keys.length === 0 && stored.geminiApiKey && stored.geminiApiKey.trim() !== BURNT_KEY) {
     keys.push({
       key: stored.geminiApiKey.trim(),
@@ -273,15 +647,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Ensure activeIndex is in bounds
   if (activeIndex >= keys.length) {
     activeIndex = Math.max(0, keys.length - 1);
   }
 
-  // Render Key Pool UI
   renderKeysList();
 
-  // 3. Add Key & Refresh Handlers
   if (btnAddKey) {
     btnAddKey.addEventListener("click", async () => {
       await handleAddKey();
@@ -321,13 +692,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    // Check for duplicates
     if (keys.some(k => k.key === rawKey)) {
       showFeedback("This API key is already in your pool.", "error");
       return;
     }
 
-    // Test & auto-detect model via background script
     setAddButtonLoading(true);
     showFeedback("Testing key & auto-detecting optimal AI model...", "info");
 
@@ -356,7 +725,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         activeIndex = 0;
       }
 
-      // Save to storage
       await chrome.storage.local.set({
         geminiApiKeys: keys,
         activeKeyIndex: activeIndex,
@@ -381,12 +749,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     btnAddText.innerText = isLoading ? "Verifying..." : "+ Add Key";
   }
 
-  // 4. Render Keys List
   function renderKeysList() {
     if (!keysListContainer) return;
     keysListContainer.innerHTML = "";
 
-    // Update count badge
     if (keyCountBadge) {
       keyCountBadge.innerText = `${keys.length} / ${MAX_KEYS}`;
       if (keys.length >= MAX_KEYS) {
@@ -396,18 +762,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
 
-    // Update Header Status Badge
-    if (statusBadge) {
-      if (keys.length > 0) {
-        statusBadge.innerText = `Connected (${keys.length} Key${keys.length > 1 ? "s" : ""})`;
-        statusBadge.className = "status-badge connected";
-      } else {
-        statusBadge.innerText = "Key Missing";
-        statusBadge.className = "status-badge disconnected";
-      }
-    }
-
-    // Update Active Model indicator
     if (activeModelName) {
       if (keys.length > 0 && keys[activeIndex]) {
         activeModelName.innerText = keys[activeIndex].model || "Auto-Selected";
@@ -416,7 +770,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
 
-    // If pool is empty, render friendly placeholder and hide refresh button
     if (keys.length === 0) {
       if (btnRefreshKeys) btnRefreshKeys.style.display = "none";
       const emptyDiv = document.createElement("div");
@@ -430,7 +783,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       btnRefreshKeys.style.display = "flex";
     }
 
-    // Render each key card
     keys.forEach((keyItem, index) => {
       const isCurrentActive = index === activeIndex;
       const rawStatus = keyItem.status || (isCurrentActive ? "active" : "standby");
@@ -439,7 +791,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       const itemEl = document.createElement("div");
       itemEl.className = `key-item ${itemStatus}${isCurrentActive ? " active" : ""}`;
 
-      // Mask key for safety: e.g. "AIzaSy...4X9Z"
       const masked = maskKey(keyItem.key);
 
       let pillText = itemStatus.toUpperCase();
@@ -465,7 +816,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         </div>
       `;
 
-      // Event: Activate Key
       const btnActivate = itemEl.querySelector(".btn-key-activate");
       if (btnActivate) {
         btnActivate.addEventListener("click", async () => {
@@ -473,7 +823,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
       }
 
-      // Event: Delete Key
       const btnDelete = itemEl.querySelector(".btn-key-delete");
       if (btnDelete) {
         btnDelete.addEventListener("click", async () => {
@@ -485,12 +834,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Activate Key Action
   async function activateKey(index) {
     if (index < 0 || index >= keys.length) return;
     activeIndex = index;
 
-    // Set statuses
     keys.forEach((k, idx) => {
       if (idx === activeIndex) {
         k.status = "active";
@@ -510,13 +857,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderKeysList();
   }
 
-  // Delete Key Action
   async function deleteKey(index) {
     if (index < 0 || index >= keys.length) return;
 
-    const removed = keys.splice(index, 1)[0];
+    keys.splice(index, 1);
 
-    // Adjust activeIndex if necessary
     if (activeIndex >= keys.length) {
       activeIndex = Math.max(0, keys.length - 1);
     }
@@ -535,7 +880,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderKeysList();
   }
 
-  // 5. Refresh All API Keys Handler
   async function handleRefreshAllKeys() {
     if (keys.length === 0) {
       showFeedback("No API keys in pool to refresh. Add a key first.", "info");
@@ -561,7 +905,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       renderKeysList();
 
-      const { total, restored, ready, exhausted, invalid } = response.stats || {};
+      const { total, restored, ready, exhausted } = response.stats || {};
       if (restored > 0) {
         showFeedback(`✓ Limits restored for ${restored} key(s)! (${ready} of ${total} keys ready to use)`, "success");
       } else if (ready > 0) {
@@ -591,7 +935,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Keep popup synced if background rotates keys or updates storage
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "local") {
       let shouldRerender = false;
@@ -612,7 +955,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // Helper to mask key: "AQ.Ab8...71Xa"
   function maskKey(key) {
     if (!key) return "••••••••••••";
     const trimmed = key.trim();
@@ -633,4 +975,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       }, 6000);
     }
   }
+
+  // -------------------------------------------------------------
+  // Initial Boot: Check Authentication & Single-Device State
+  // -------------------------------------------------------------
+  await checkAuthAndDeviceState();
 });

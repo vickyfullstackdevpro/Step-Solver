@@ -1,4 +1,5 @@
 // background.js - Service Worker for Gemini Live Question Solver
+importScripts("auth.js");
 
 const DEFAULT_MODEL = "gemini-3.1-flash-lite-preview";
 const BURNT_KEY = "AQ.Ab8RN6I1C1o7hEEyqfwMJUFw1TdSg-kRieVIS06703505QTCrQ";
@@ -181,7 +182,25 @@ async function getOrDetectModel(apiKey) {
 
 // Query Gemini API with question payload and automatic key failover (Max 10 keys)
 async function handleSolveQuestion(payload) {
-  // 1. Verify 30-Minute Free Trial / Lifetime Subscription
+  // 1. Verify User Authentication Session
+  if (typeof StepAuth !== "undefined") {
+    const session = await StepAuth.getStoredSession();
+    if (!session || !session.access_token) {
+      const err = new Error("Authentication required. Please click the Step Solver extension icon and sign in.");
+      err.code = "AUTH_REQUIRED";
+      throw err;
+    }
+
+    // 2. Strict Single-Device Concurrency Lock Verification
+    const concurrency = await StepAuth.verifyDeviceConcurrency();
+    if (concurrency.isDeviceActive === false) {
+      const err = new Error("Device revoked. Your account is active on another device. Open the extension popup to claim this device.");
+      err.code = "DEVICE_REVOKED";
+      throw err;
+    }
+  }
+
+  // 3. Verify 30-Minute Free Trial / Lifetime Subscription
   const subStatus = await getSubscriptionStatus();
   if (subStatus.isTrialExpired && !subStatus.isLifetime) {
     const error = new Error("Your 30-minute free trial has expired. Upgrade to Lifetime Access to continue solving.");
@@ -1024,8 +1043,25 @@ async function getSubscriptionStatus() {
     "isLifetimeActive",
     "trialStartedAt",
     "licenseKey",
-    "lifetimeActivatedAt"
+    "lifetimeActivatedAt",
+    "userProfile"
   ]);
+
+  // If user profile from Supabase indicates paid
+  if (data.userProfile && data.userProfile.payment_status === "paid") {
+    if (!data.isLifetimeActive) {
+      await chrome.storage.local.set({ isLifetimeActive: true, paidViaRazorpay: true });
+    }
+    return {
+      status: "LIFETIME_ACTIVE",
+      isLifetime: true,
+      isTrialExpired: false,
+      remainingMs: Infinity,
+      remainingMinutes: Infinity,
+      remainingSeconds: Infinity,
+      purchaseUrl: LIFETIME_PURCHASE_URL
+    };
+  }
 
   if (data.isLifetimeActive === true) {
     return {
@@ -1041,6 +1077,14 @@ async function getSubscriptionStatus() {
 
   const now = Date.now();
   let trialStartedAt = data.trialStartedAt;
+
+  // If server profile has trial_started_at, prioritize server timestamp
+  if (data.userProfile && data.userProfile.trial_started_at) {
+    const serverMs = new Date(data.userProfile.trial_started_at).getTime();
+    if (!isNaN(serverMs)) {
+      trialStartedAt = serverMs;
+    }
+  }
 
   // Initialize trial timestamp on first query if not present
   if (!trialStartedAt || typeof trialStartedAt !== "number") {

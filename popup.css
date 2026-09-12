@@ -1053,3 +1053,394 @@ body {
   color: #94a3b8;
   line-height: 1.35;
 }
+
+/* ============================================================ */
+/* User Account Bar (Top of popup when logged in) */
+/* ============================================================ */
+.user-account-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin-top: -4px;
+}
+
+.user-account-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.user-email-pill {
+  font-size: 11px;
+  font-weight: 600;
+  color: #cbd5e1;
+  max-width: 170px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-status-pill {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.btn-sign-out {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-sign-out:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* ============================================================ */
+/* View Containers */
+/* ============================================================ */
+.popup-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: fadeIn 0.18s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================ */
+/* Auth Card (Sign In & Sign Up) */
+/* ============================================================ */
+.auth-card {
+  padding: 16px;
+  gap: 14px;
+}
+
+.auth-header-row h2 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 3px;
+}
+
+.auth-header-row p {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.auth-tabs {
+  display: flex;
+  background: rgba(11, 17, 32, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 4px;
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 7px 0;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.auth-tab:hover {
+  color: #ffffff;
+}
+
+.auth-tab.active {
+  background: #6366f1;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-feedback {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.auth-feedback.error {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.auth-feedback.success {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+}
+
+.auth-feedback.info {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #bae6fd;
+}
+
+.btn-auth-primary {
+  width: 100%;
+  padding: 10px;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn-auth-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+  transform: translateY(-1px);
+}
+
+.btn-auth-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-auth-secondary {
+  width: 100%;
+  padding: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn-auth-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.auth-trial-perks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.perk-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+
+.perk-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+/* ============================================================ */
+/* Verify Card (Email Verification Pending) */
+/* ============================================================ */
+.verify-card {
+  text-align: center;
+  padding: 20px 16px;
+  gap: 12px;
+  align-items: center;
+}
+
+.verify-icon-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.verify-icon {
+  font-size: 24px;
+}
+
+.verify-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.verify-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.5;
+  max-width: 320px;
+}
+
+.verify-desc strong {
+  color: #38bdf8;
+}
+
+.verify-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.verify-footer {
+  margin-top: 4px;
+}
+
+.link-secondary {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.link-secondary:hover {
+  color: #94a3b8;
+}
+
+/* ============================================================ */
+/* Device Conflict Card (Single-Device Concurrency Lock) */
+/* ============================================================ */
+.conflict-card {
+  text-align: center;
+  padding: 20px 16px;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.06) 0%, rgba(30, 41, 59, 1) 100%);
+}
+
+.conflict-icon-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conflict-icon {
+  font-size: 24px;
+}
+
+.conflict-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fcd34d;
+}
+
+.conflict-desc {
+  font-size: 11.5px;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+.conflict-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.btn-claim {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
+}
+
+.btn-claim:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+}
+
+.conflict-footnote {
+  font-size: 10px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+/* ============================================================ */
+/* Payment Polling Status Indicator */
+/* ============================================================ */
+.payment-polling-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #6ee7b7;
+  animation: pulseGlow 1.5s infinite alternate;
+}
+
+@keyframes pulseGlow {
+  from { border-color: rgba(16, 185, 129, 0.25); background: rgba(16, 185, 129, 0.06); }
+  to { border-color: rgba(16, 185, 129, 0.6); background: rgba(16, 185, 129, 0.16); }
+}
+
+.polling-spinner {
+  display: inline-block;
+  animation: spin 1.2s linear infinite;
+  font-size: 12px;
+}
+
