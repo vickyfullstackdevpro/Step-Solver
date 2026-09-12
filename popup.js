@@ -128,7 +128,18 @@ document.addEventListener("DOMContentLoaded", async () => {
       switchView("main");
       updateHeaderStatus("Ready", "connected");
 
-      // Check and update subscription & trial status
+      // 1. Sync cloud user profile from Supabase (payment_status, trial_started_at)
+      await StepAuth.syncUserProfile(session);
+
+      // 2. Check and verify pending payment link if not yet lifetime
+      const storedPay = await chrome.storage.local.get(["activePaymentLinkId", "isLifetimeActive"]);
+      if (!storedPay.isLifetimeActive && storedPay.activePaymentLinkId) {
+        try {
+          await StepAuth.verifyRazorpayPaymentLink(storedPay.activePaymentLinkId);
+        } catch (_) {}
+      }
+
+      // 3. Check and update subscription & trial status
       await updateSubscriptionUI();
 
     } catch (err) {
