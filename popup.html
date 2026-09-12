@@ -205,8 +205,11 @@
 
             <!-- Live Payment Status Polling Indicator -->
             <div id="payment-polling-status" class="payment-polling-status" style="display: none;">
-              <span class="polling-spinner">🔄</span>
-              <span id="payment-polling-text">Opening Razorpay checkout in new tab...</span>
+              <div class="polling-row">
+                <span class="polling-spinner">🔄</span>
+                <span id="payment-polling-text">Opening Razorpay checkout in new tab...</span>
+              </div>
+              <button id="btn-manual-paid-confirm" class="btn-manual-paid" type="button">✓ I've Completed Payment</button>
             </div>
             
             <div class="license-key-toggle-row">

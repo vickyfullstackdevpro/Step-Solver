@@ -437,22 +437,35 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Razorpay Hosted Payment Flow
+  const btnManualPaidConfirm = document.getElementById("btn-manual-paid-confirm");
+
   if (btnGetLifetime) {
     btnGetLifetime.addEventListener("click", async () => {
       btnGetLifetime.disabled = true;
-      showPaymentPolling("Initializing Razorpay checkout...");
+      showPaymentPolling("Opening Razorpay checkout in new tab...");
 
       try {
         const session = await StepAuth.getStoredSession();
         const userEmail = session?.user?.email || "customer@step-solver.com";
         const userName = session?.user?.user_metadata?.full_name || "Step Solver User";
 
-        const paymentData = await StepAuth.createRazorpayPaymentLink(userEmail, userName);
-        
-        // Open Razorpay hosted payment link in a new browser tab
-        chrome.tabs.create({ url: paymentData.paymentUrl });
+        let paymentUrl = "https://rzp.io/rzp/Wk3xyuB";
+        let paymentLinkId = "plink_Tb2fkbf9vmJ4ka";
 
-        showPaymentPolling("Waiting for payment completion in new tab...");
+        try {
+          const paymentData = await StepAuth.createRazorpayPaymentLink(userEmail, userName);
+          if (paymentData && paymentData.paymentUrl) {
+            paymentUrl = paymentData.paymentUrl;
+            paymentLinkId = paymentData.paymentLinkId;
+          }
+        } catch (apiErr) {
+          console.warn("[Razorpay] Notice:", apiErr.message);
+        }
+
+        // Open Razorpay hosted payment link in a new browser tab immediately
+        chrome.tabs.create({ url: paymentUrl });
+
+        showPaymentPolling("Payment tab opened! Complete ₹50 on Razorpay, then click below:");
 
         // Start polling Razorpay payment status
         if (paymentPollingTimer) clearInterval(paymentPollingTimer);
@@ -462,7 +475,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         paymentPollingTimer = setInterval(async () => {
           pollAttempts++;
           try {
-            const check = await StepAuth.verifyRazorpayPaymentLink(paymentData.paymentLinkId);
+            const check = await StepAuth.verifyRazorpayPaymentLink(paymentLinkId);
             if (check.isPaid) {
               clearInterval(paymentPollingTimer);
               paymentPollingTimer = null;
@@ -473,16 +486,49 @@ document.addEventListener("DOMContentLoaded", async () => {
             } else if (pollAttempts >= maxPollAttempts) {
               clearInterval(paymentPollingTimer);
               paymentPollingTimer = null;
-              hidePaymentPolling();
               btnGetLifetime.disabled = false;
             }
           } catch (_) {}
         }, 3000);
 
       } catch (err) {
-        showPaymentPolling("Payment error: " + (err.message || "Failed to initialize payment link."));
-        setTimeout(hidePaymentPolling, 4000);
+        console.warn("[Payment] Launching direct checkout tab:", err.message);
+        chrome.tabs.create({ url: "https://rzp.io/rzp/Wk3xyuB" });
+        showPaymentPolling("Payment tab opened! Complete ₹50 on Razorpay, then click below:");
+      } finally {
         btnGetLifetime.disabled = false;
+      }
+    });
+  }
+
+  // Manual payment confirmation button
+  if (btnManualPaidConfirm) {
+    btnManualPaidConfirm.addEventListener("click", async () => {
+      btnManualPaidConfirm.disabled = true;
+      btnManualPaidConfirm.innerText = "Checking...";
+
+      try {
+        const stored = await chrome.storage.local.get(["activePaymentLinkId"]);
+        const linkId = stored.activePaymentLinkId || "plink_Tb2fkbf9vmJ4ka";
+        const check = await StepAuth.verifyRazorpayPaymentLink(linkId);
+
+        if (check.isPaid) {
+          showPaymentPolling("✓ Payment verified! Lifetime Access Activated!", true);
+          setTimeout(() => {
+            updateSubscriptionUI();
+          }, 1000);
+        } else {
+          // If banking status is pending, allow user to enter key or check again
+          showPaymentPolling("Payment pending or confirming. You can also paste your activation key below.", false);
+          if (licenseInputContainer) licenseInputContainer.style.display = "flex";
+          if (licenseKeyInput) licenseKeyInput.focus();
+        }
+      } catch (err) {
+        showPaymentPolling("Please enter your activation key below to unlock.", false);
+        if (licenseInputContainer) licenseInputContainer.style.display = "flex";
+      } finally {
+        btnManualPaidConfirm.disabled = false;
+        btnManualPaidConfirm.innerText = "✓ I've Completed Payment";
       }
     });
   }
