@@ -23,6 +23,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   const refreshIcon = document.getElementById("refresh-icon");
   const refreshBtnText = document.getElementById("refresh-btn-text");
 
+  // Subscription / Trial Elements
+  const trialActiveView = document.getElementById("trial-active-view");
+  const trialTimeBadge = document.getElementById("trial-time-badge");
+  const trialExpiredView = document.getElementById("trial-expired-view");
+  const lifetimeActiveView = document.getElementById("lifetime-active-view");
+  const btnGetLifetime = document.getElementById("btn-get-lifetime");
+  const btnToggleLicenseInput = document.getElementById("btn-toggle-license-input");
+  const licenseInputContainer = document.getElementById("license-input-container");
+  const licenseKeyInput = document.getElementById("license-key-input");
+  const btnActivateLicense = document.getElementById("btn-activate-license");
+  const licenseFeedback = document.getElementById("license-feedback");
+
   // 1. Load Initial State from chrome.storage.local
   const stored = await chrome.storage.local.get([
     "geminiApiKeys",
@@ -85,6 +97,142 @@ document.addEventListener("DOMContentLoaded", async () => {
       e.preventDefault();
       chrome.tabs.create({ url: "https://vignesh-fullstackdev-portfolio.vercel.app/" });
     });
+  }
+
+  // -------------------------------------------------------------
+  // Subscription & 30-Min Free Trial Handler
+  // -------------------------------------------------------------
+  let countdownInterval = null;
+
+  async function updateSubscriptionUI() {
+    try {
+      const response = await chrome.runtime.sendMessage({ action: "GET_SUBSCRIPTION_STATUS" });
+      if (!response || !response.success) return;
+
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+      }
+
+      // Case 1: Lifetime Unlocked
+      if (response.isLifetime) {
+        if (trialActiveView) trialActiveView.style.display = "none";
+        if (trialExpiredView) trialExpiredView.style.display = "none";
+        if (lifetimeActiveView) lifetimeActiveView.style.display = "flex";
+        return;
+      }
+
+      // Case 2: Trial Expired
+      if (response.isTrialExpired) {
+        if (trialActiveView) trialActiveView.style.display = "none";
+        if (trialExpiredView) trialExpiredView.style.display = "flex";
+        if (lifetimeActiveView) lifetimeActiveView.style.display = "none";
+        return;
+      }
+
+      // Case 3: Free Trial Active (< 30 minutes)
+      if (trialActiveView) trialActiveView.style.display = "flex";
+      if (trialExpiredView) trialExpiredView.style.display = "none";
+      if (lifetimeActiveView) lifetimeActiveView.style.display = "none";
+
+      let remainingMs = response.remainingMs || 0;
+
+      function renderCountdown() {
+        if (remainingMs <= 0) {
+          if (trialActiveView) trialActiveView.style.display = "none";
+          if (trialExpiredView) trialExpiredView.style.display = "flex";
+          if (countdownInterval) clearInterval(countdownInterval);
+          return;
+        }
+
+        const totalSeconds = Math.floor(remainingMs / 1000);
+        const mins = Math.floor(totalSeconds / 60);
+        const secs = totalSeconds % 60;
+
+        if (trialTimeBadge) {
+          trialTimeBadge.innerText = mins > 0 ? `${mins}m ${secs}s Left` : `${secs}s Left`;
+          if (mins < 5) {
+            trialTimeBadge.classList.add("urgent");
+          } else {
+            trialTimeBadge.classList.remove("urgent");
+          }
+        }
+      }
+
+      renderCountdown();
+      countdownInterval = setInterval(() => {
+        remainingMs -= 1000;
+        renderCountdown();
+      }, 1000);
+
+    } catch (err) {
+      console.warn("[Step Solver] Subscription UI query error:", err);
+    }
+  }
+
+  // Initialize Subscription UI
+  updateSubscriptionUI();
+
+  // Upgrade button (opens payment / portfolio page)
+  if (btnGetLifetime) {
+    btnGetLifetime.addEventListener("click", () => {
+      chrome.tabs.create({ url: "https://vignesh-fullstackdev-portfolio.vercel.app/" });
+    });
+  }
+
+  // Toggle activation key input visibility
+  if (btnToggleLicenseInput && licenseInputContainer) {
+    btnToggleLicenseInput.addEventListener("click", () => {
+      const isHidden = licenseInputContainer.style.display === "none";
+      licenseInputContainer.style.display = isHidden ? "flex" : "none";
+      if (isHidden && licenseKeyInput) {
+        licenseKeyInput.focus();
+      }
+    });
+  }
+
+  // Activate license key
+  if (btnActivateLicense && licenseKeyInput) {
+    btnActivateLicense.addEventListener("click", async () => {
+      const rawKey = licenseKeyInput.value.trim();
+      if (!rawKey) {
+        showLicenseFeedback("Please enter your activation key.", "error");
+        return;
+      }
+
+      btnActivateLicense.disabled = true;
+      btnActivateLicense.innerText = "Verifying...";
+      showLicenseFeedback("Validating activation key...", "info");
+
+      try {
+        const res = await chrome.runtime.sendMessage({
+          action: "ACTIVATE_LICENSE_KEY",
+          licenseKey: rawKey
+        });
+
+        if (!res || !res.success) {
+          throw new Error(res?.error || "Invalid key. Please check your key.");
+        }
+
+        showLicenseFeedback("✓ Lifetime access unlocked successfully!", "success");
+        setTimeout(() => {
+          updateSubscriptionUI();
+        }, 1200);
+
+      } catch (err) {
+        showLicenseFeedback(err.message, "error");
+      } finally {
+        btnActivateLicense.disabled = false;
+        btnActivateLicense.innerText = "Activate";
+      }
+    });
+  }
+
+  function showLicenseFeedback(text, type) {
+    if (!licenseFeedback) return;
+    licenseFeedback.innerText = text;
+    licenseFeedback.className = `license-feedback ${type}`;
+    licenseFeedback.style.display = "block";
   }
 
   // Playground Button
@@ -454,6 +602,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (changes.activeKeyIndex) {
         activeIndex = changes.activeKeyIndex.newValue || 0;
         shouldRerender = true;
+      }
+      if (changes.isLifetimeActive || changes.trialStartedAt) {
+        updateSubscriptionUI();
       }
       if (shouldRerender) {
         renderKeysList();

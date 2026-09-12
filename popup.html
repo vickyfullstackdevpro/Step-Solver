@@ -16,7 +16,7 @@
         </div>
         <div class="brand-text">
           <h1>Step Solver</h1>
-          <span class="version-tag">AI Assessment Solver v1.0.1</span>
+          <span class="version-tag">AI Assessment Solver v1.0.2</span>
         </div>
       </div>
       <div id="status-badge" class="status-badge disconnected">Key Missing</div>
@@ -35,6 +35,57 @@
             <input type="checkbox" id="master-power-toggle" checked>
             <span class="master-slider"></span>
           </label>
+        </div>
+      </section>
+
+      <!-- 30-Minute Free Trial & Lifetime Subscription Status Card -->
+      <section id="subscription-card" class="settings-card subscription-card">
+        <!-- Active Trial View -->
+        <div id="trial-active-view" class="subscription-row">
+          <div class="subscription-info">
+            <div class="subscription-title-row">
+              <span class="subscription-title">⏱️ Free Trial</span>
+              <span id="trial-time-badge" class="trial-badge">30m Left</span>
+            </div>
+            <span class="subscription-sub">Full AI solving unlocked for your first 30 minutes.</span>
+          </div>
+        </div>
+
+        <!-- Trial Expired Paywall View -->
+        <div id="trial-expired-view" class="trial-expired-container" style="display: none;">
+          <div class="trial-expired-header">
+            <span class="trial-expired-icon">⏳</span>
+            <div class="trial-expired-text">
+              <strong>30-Minute Free Trial Ended</strong>
+              <p>Upgrade to Lifetime Access to continue solving unlimited questions.</p>
+            </div>
+          </div>
+          
+          <button id="btn-get-lifetime" class="btn-lifetime-upgrade">
+            <span>⭐ Get Lifetime Access</span>
+            <span class="lifetime-price-tag">₹50</span>
+          </button>
+          
+          <div class="license-key-toggle-row">
+            <button id="btn-toggle-license-input" class="link-license-toggle">Already have an Activation Key?</button>
+          </div>
+
+          <div id="license-input-container" class="license-input-container" style="display: none;">
+            <div class="license-input-row">
+              <input type="text" id="license-key-input" placeholder="Enter Lifetime Key (STEP-...)" spellcheck="false" autocomplete="off">
+              <button id="btn-activate-license" class="btn-activate-key">Activate</button>
+            </div>
+            <div id="license-feedback" class="license-feedback"></div>
+          </div>
+        </div>
+
+        <!-- Lifetime Active View -->
+        <div id="lifetime-active-view" class="lifetime-active-container" style="display: none;">
+          <div class="lifetime-active-badge-row">
+            <span class="lifetime-star-icon">⭐</span>
+            <span class="lifetime-active-title">Lifetime Access Active</span>
+          </div>
+          <span class="lifetime-active-sub">Unlimited AI questions & model failover unlocked forever.</span>
         </div>
       </section>
 

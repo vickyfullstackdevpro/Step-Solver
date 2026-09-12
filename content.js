@@ -362,6 +362,30 @@
     }
   }
 
+  function showTrialExpiredBanner(purchaseUrl) {
+    const targetUrl = purchaseUrl || "https://vignesh-fullstackdev-portfolio.vercel.app/";
+    renderAnswerBanner(
+      "30-Minute Free Trial Ended",
+      "Upgrade to Lifetime Access (₹50) to continue solving unlimited questions.",
+      "⏳ Free Trial Expired"
+    );
+
+    const subEl = document.getElementById("gemini-answer-sub-text");
+    if (subEl) {
+      subEl.innerHTML = `
+        <div style="color: #cbd5e1; font-size: 11px; margin-top: 4px; line-height: 1.4;">
+          Your 30-minute free trial has expired. Upgrade to lifetime access to continue solving questions automatically.
+        </div>
+        <div style="margin-top: 8px;">
+          <a href="${targetUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 6px 14px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; font-weight: 700; font-size: 11px; border-radius: 6px; text-decoration: none; box-shadow: 0 3px 10px rgba(16, 185, 129, 0.4); transition: transform 0.15s ease;">
+            ⭐ Get Lifetime Access (₹50)
+          </a>
+        </div>
+      `;
+      subEl.style.display = "block";
+    }
+  }
+
   function updateStatus(status, type = "working", badge = "SCANNING") {
     const statusText = document.getElementById("gemini-status-text");
     const pulseDot = document.getElementById("gemini-pulse-dot");
@@ -2592,6 +2616,16 @@
       });
 
       if (!response || !response.success) {
+        if (response && response.isTrialExpired) {
+          showTrialExpiredBanner(response.purchaseUrl);
+          updateStatus("Trial Expired", "error", "LOCKED");
+          if (btnSolve) {
+            btnSolve.disabled = false;
+            btnSolve.innerText = "⭐ Upgrade";
+            btnSolve.onclick = () => window.open(response.purchaseUrl || "https://vignesh-fullstackdev-portfolio.vercel.app/", "_blank");
+          }
+          return;
+        }
         throw new Error(response?.error || "Failed to receive answer from Gemini API.");
       }
 

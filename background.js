@@ -3,13 +3,45 @@
 const DEFAULT_MODEL = "gemini-3.1-flash-lite-preview";
 const BURNT_KEY = "AQ.Ab8RN6I1C1o7hEEyqfwMJUFw1TdSg-kRieVIS06703505QTCrQ";
 
+// Trial & Lifetime Subscription Configuration
+const TRIAL_DURATION_MS = 30 * 60 * 1000; // 30 minutes in milliseconds
+const LIFETIME_PURCHASE_URL = "https://vignesh-fullstackdev-portfolio.vercel.app/";
+
+// Initialize trial timestamp upon first installation
+chrome.runtime.onInstalled.addListener(async () => {
+  const data = await chrome.storage.local.get(["trialStartedAt", "isLifetimeActive"]);
+  if (!data.trialStartedAt && !data.isLifetimeActive) {
+    await chrome.storage.local.set({ trialStartedAt: Date.now() });
+  }
+});
+
 // Listen for messages from popup or content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "SOLVE_QUESTION") {
     handleSolveQuestion(request.payload)
       .then((data) => sendResponse({ success: true, data }))
-      .catch((err) => sendResponse({ success: false, error: err.message, code: err.code }));
+      .catch((err) => sendResponse({
+        success: false,
+        error: err.message,
+        code: err.code,
+        isTrialExpired: !!err.isTrialExpired,
+        purchaseUrl: err.purchaseUrl || LIFETIME_PURCHASE_URL
+      }));
     return true; // Keep message channel open for async response
+  }
+
+  if (request.action === "GET_SUBSCRIPTION_STATUS") {
+    getSubscriptionStatus()
+      .then((res) => sendResponse({ success: true, ...res }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "ACTIVATE_LICENSE_KEY") {
+    handleActivateLicenseKey(request.licenseKey)
+      .then((res) => sendResponse({ success: true, ...res }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
   }
 
   if (request.action === "TEST_API_KEY") {
@@ -149,6 +181,16 @@ async function getOrDetectModel(apiKey) {
 
 // Query Gemini API with question payload and automatic key failover (Max 10 keys)
 async function handleSolveQuestion(payload) {
+  // 1. Verify 30-Minute Free Trial / Lifetime Subscription
+  const subStatus = await getSubscriptionStatus();
+  if (subStatus.isTrialExpired && !subStatus.isLifetime) {
+    const error = new Error("Your 30-minute free trial has expired. Upgrade to Lifetime Access to continue solving.");
+    error.code = "TRIAL_EXPIRED";
+    error.isTrialExpired = true;
+    error.purchaseUrl = subStatus.purchaseUrl;
+    throw error;
+  }
+
   const settings = await chrome.storage.local.get([
     "geminiApiKeys",
     "activeKeyIndex",
@@ -971,5 +1013,104 @@ async function handleRefreshSingleKey(keyIndex) {
     status: keyObj.status,
     model: keyObj.model,
     error: res.error
+  };
+}
+
+// -------------------------------------------------------------
+// Free Trial (30 Min) & Lifetime Subscription Manager
+// -------------------------------------------------------------
+async function getSubscriptionStatus() {
+  const data = await chrome.storage.local.get([
+    "isLifetimeActive",
+    "trialStartedAt",
+    "licenseKey",
+    "lifetimeActivatedAt"
+  ]);
+
+  if (data.isLifetimeActive === true) {
+    return {
+      status: "LIFETIME_ACTIVE",
+      isLifetime: true,
+      isTrialExpired: false,
+      remainingMs: Infinity,
+      remainingMinutes: Infinity,
+      remainingSeconds: Infinity,
+      purchaseUrl: LIFETIME_PURCHASE_URL
+    };
+  }
+
+  const now = Date.now();
+  let trialStartedAt = data.trialStartedAt;
+
+  // Initialize trial timestamp on first query if not present
+  if (!trialStartedAt || typeof trialStartedAt !== "number") {
+    trialStartedAt = now;
+    await chrome.storage.local.set({ trialStartedAt });
+  }
+
+  const elapsedMs = now - trialStartedAt;
+  const remainingMs = Math.max(0, TRIAL_DURATION_MS - elapsedMs);
+  const remainingMinutes = Math.ceil(remainingMs / 60000);
+  const remainingSeconds = Math.ceil(remainingMs / 1000);
+  const isTrialExpired = remainingMs <= 0;
+
+  return {
+    status: isTrialExpired ? "TRIAL_EXPIRED" : "TRIAL_ACTIVE",
+    isLifetime: false,
+    isTrialExpired,
+    trialStartedAt,
+    elapsedMs,
+    remainingMs,
+    remainingMinutes,
+    remainingSeconds,
+    purchaseUrl: LIFETIME_PURCHASE_URL
+  };
+}
+
+function validateLicenseKey(rawKey) {
+  if (!rawKey || typeof rawKey !== "string") return false;
+  const key = rawKey.trim().toUpperCase().replace(/\s+/g, "");
+
+  // 1. Direct VIP / Master Keys
+  const masterKeys = [
+    "STEP-LIFETIME-VIP",
+    "STEP-PRO-2026",
+    "VIGNESH-VIP-ACCESS",
+    "STEP-SOLVER-PRO",
+    "STEP-LIFE-UNLIMITED"
+  ];
+  if (masterKeys.includes(key)) return true;
+
+  // 2. Pattern A: STEP-LIFE-[alphanumeric 4-16 chars] (e.g. STEP-LIFE-USER50, STEP-LIFE-987654)
+  if (/^STEP-LIFE-[A-Z0-9]{4,16}$/.test(key)) return true;
+
+  // 3. Pattern B: STEP-[4 chars]-[4 chars]-[4 chars] (e.g. STEP-ABCD-1234-EFGH)
+  if (/^STEP-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)) return true;
+
+  return false;
+}
+
+async function handleActivateLicenseKey(rawKey) {
+  if (!rawKey || typeof rawKey !== "string" || !rawKey.trim()) {
+    throw new Error("Please enter an activation key.");
+  }
+
+  const normalized = rawKey.trim().toUpperCase();
+  const isValid = validateLicenseKey(normalized);
+
+  if (!isValid) {
+    throw new Error("Invalid activation key. Please verify your key or purchase lifetime access.");
+  }
+
+  await chrome.storage.local.set({
+    isLifetimeActive: true,
+    licenseKey: normalized,
+    lifetimeActivatedAt: Date.now()
+  });
+
+  return {
+    success: true,
+    message: "Lifetime access activated successfully! Unlimited solving unlocked.",
+    isLifetime: true
   };
 }
