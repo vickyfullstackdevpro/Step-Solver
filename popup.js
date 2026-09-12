@@ -131,11 +131,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       // 1. Sync cloud user profile from Supabase (payment_status, trial_started_at)
       await StepAuth.syncUserProfile(session);
 
-      // 2. Check and verify pending payment link if not yet lifetime
-      const storedPay = await chrome.storage.local.get(["activePaymentLinkId", "isLifetimeActive"]);
-      if (!storedPay.isLifetimeActive && storedPay.activePaymentLinkId) {
+      // 2. Check and verify pending payment link ONLY if user initiated payment verification
+      const storedPay = await chrome.storage.local.get(["activePaymentLinkId", "isLifetimeActive", "pendingPaymentVerification"]);
+      if (!storedPay.isLifetimeActive && storedPay.activePaymentLinkId && storedPay.pendingPaymentVerification) {
         try {
-          await StepAuth.verifyRazorpayPaymentLink(storedPay.activePaymentLinkId);
+          const res = await StepAuth.verifyRazorpayPaymentLink(storedPay.activePaymentLinkId);
+          if (res && res.isPaid) {
+            await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
+          }
         } catch (_) {}
       }
 
@@ -473,6 +476,11 @@ document.addEventListener("DOMContentLoaded", async () => {
           console.warn("[Razorpay] Notice:", apiErr.message);
         }
 
+        await chrome.storage.local.set({
+          pendingPaymentVerification: true,
+          activePaymentLinkId: paymentLinkId
+        });
+
         // Open Razorpay hosted payment link in a new browser tab immediately
         chrome.tabs.create({ url: paymentUrl });
 
@@ -490,6 +498,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             if (check.isPaid) {
               clearInterval(paymentPollingTimer);
               paymentPollingTimer = null;
+              await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
               showPaymentPolling("✓ Payment confirmed! Lifetime Access Activated!", true);
               setTimeout(() => {
                 updateSubscriptionUI();
@@ -504,6 +513,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       } catch (err) {
         console.warn("[Payment] Launching direct checkout tab:", err.message);
+        await chrome.storage.local.set({
+          pendingPaymentVerification: true,
+          activePaymentLinkId: "plink_Tb2fkbf9vmJ4ka"
+        });
         chrome.tabs.create({ url: "https://rzp.io/rzp/Wk3xyuB" });
         showPaymentPolling("Payment tab opened! Complete ₹50 on Razorpay, then click below:");
       } finally {
@@ -524,6 +537,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         const check = await StepAuth.verifyRazorpayPaymentLink(linkId);
 
         if (check.isPaid) {
+          await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
           showPaymentPolling("✓ Payment verified! Lifetime Access Activated!", true);
           setTimeout(() => {
             updateSubscriptionUI();

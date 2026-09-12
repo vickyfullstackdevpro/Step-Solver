@@ -1132,6 +1132,17 @@ async function getSubscriptionStatus() {
     };
   }
 
+  // If user profile from Supabase explicitly indicates NOT paid
+  if (data.userProfile && data.userProfile.payment_status !== "paid") {
+    const hasValidKey = data.licenseKey && validateLicenseKey(data.licenseKey);
+    if (!hasValidKey) {
+      if (data.isLifetimeActive) {
+        await chrome.storage.local.set({ isLifetimeActive: false, paidViaRazorpay: false });
+        data.isLifetimeActive = false;
+      }
+    }
+  }
+
   if (data.isLifetimeActive === true) {
     return {
       status: "LIFETIME_ACTIVE",

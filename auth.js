@@ -137,7 +137,15 @@ async function authSignOut() {
       headers: { "Authorization": `Bearer ${session.access_token}` }
     }).catch(() => {});
   }
-  await chrome.storage.local.remove(["supabaseSession", "isLoggedIn", "userProfile"]);
+  await chrome.storage.local.remove([
+    "supabaseSession",
+    "isLoggedIn",
+    "userProfile",
+    "isLifetimeActive",
+    "paidViaRazorpay",
+    "activePaymentLinkId",
+    "pendingPaymentVerification"
+  ]);
   return { success: true };
 }
 
@@ -196,6 +204,16 @@ async function syncUserProfile(session) {
       paidViaRazorpay: true,
       lifetimeActivatedAt: profile.paid_at ? new Date(profile.paid_at).getTime() : Date.now()
     });
+  } else {
+    // Database profile is unpaid, refunded, or revoked
+    const local = await chrome.storage.local.get(["licenseKey"]);
+    if (!local.licenseKey) {
+      await chrome.storage.local.set({
+        isLifetimeActive: false,
+        paidViaRazorpay: false
+      });
+      await chrome.storage.local.remove(["activePaymentLinkId", "pendingPaymentVerification"]);
+    }
   }
 
   // 2. Sync Trial Start Timestamp (Server authoritative)
@@ -511,6 +529,7 @@ async function verifyRazorpayPaymentLink(paymentLinkId) {
           paidViaRazorpay: true,
           lastPaymentId: paymentId
         });
+        await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
 
         const session = await getStoredSession();
         const userId = session?.user?.id;
