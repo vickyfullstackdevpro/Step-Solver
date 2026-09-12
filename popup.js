@@ -67,11 +67,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const btnGetLifetime = document.getElementById("btn-get-lifetime");
   const paymentPollingStatus = document.getElementById("payment-polling-status");
   const paymentPollingText = document.getElementById("payment-polling-text");
-  const btnToggleLicenseInput = document.getElementById("btn-toggle-license-input");
-  const licenseInputContainer = document.getElementById("license-input-container");
-  const licenseKeyInput = document.getElementById("license-key-input");
-  const btnActivateLicense = document.getElementById("btn-activate-license");
-  const licenseFeedback = document.getElementById("license-feedback");
+  const btnInstantVerify = document.getElementById("btn-instant-verify");
 
   let authMode = "signin"; // "signin" | "signup"
   let paymentPollingTimer = null;
@@ -92,7 +88,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // -------------------------------------------------------------
-  // 2. Auth & Single-Device State Evaluator
+  // 2. Auth & Single-Device State Evaluator (Authoritative DB Truth)
   // -------------------------------------------------------------
   async function checkAuthAndDeviceState() {
     try {
@@ -103,13 +99,27 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
-      // Check user email verification status if Supabase enforces confirmation
-      const user = session.user;
-      const userEmail = user?.email || "";
+      // Check session validity directly on Supabase server
+      const authUser = await StepAuth.validateSessionOnServer(session);
+      if (!authUser) {
+        switchView("auth");
+        updateHeaderStatus("Auth Required", "disconnected");
+        return;
+      }
+
+      // Check user email confirmation status
+      if (authUser.email_confirmed_at === null && !authUser.confirmed_at) {
+        switchView("verify");
+        if (verifyEmailDisplay) verifyEmailDisplay.innerText = authUser.email || session.user?.email || "";
+        updateHeaderStatus("Verify Email", "disconnected");
+        return;
+      }
+
+      const userEmail = authUser.email || session.user?.email || "";
       if (userEmailDisplay) userEmailDisplay.innerText = userEmail;
       if (verifyEmailDisplay) verifyEmailDisplay.innerText = userEmail;
 
-      // Single-Device Concurrency Verification
+      // Live Single-Device Concurrency Verification from Supabase Database
       const concurrency = await StepAuth.verifyDeviceConcurrency();
 
       if (!concurrency.isAuthenticated) {
@@ -120,6 +130,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       if (concurrency.isDeviceActive === false) {
         switchView("conflict");
+        if (conflictFeedback) {
+          const otherDevice = concurrency.conflictDeviceName || "another machine";
+          conflictFeedback.innerText = `Account currently active on ${otherDevice}. Single-device lock enabled.`;
+          conflictFeedback.className = "auth-feedback error";
+          conflictFeedback.style.display = "block";
+        }
         updateHeaderStatus("Conflict", "disconnected");
         return;
       }
@@ -128,7 +144,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       switchView("main");
       updateHeaderStatus("Ready", "connected");
 
-      // 1. Sync cloud user profile from Supabase (payment_status, trial_started_at)
+      // 1. Sync authoritative cloud user profile from Supabase (payment_status, trial_started_at)
       await StepAuth.syncUserProfile(session);
 
       // 2. Check and verify pending payment link ONLY if user initiated payment verification
@@ -223,28 +239,24 @@ document.addEventListener("DOMContentLoaded", async () => {
             await checkAuthAndDeviceState();
           }, 600);
         } catch (err) {
-          showAuthFeedback(err.message || "Failed to sign in. Please check credentials.", "error");
+          if (err.code === "EMAIL_NOT_CONFIRMED") {
+            if (verifyEmailDisplay) verifyEmailDisplay.innerText = email;
+            switchView("verify");
+            showVerifyFeedback("Please verify your email to continue. A link was sent via Resend.", "info");
+          } else {
+            showAuthFeedback(err.message || "Failed to sign in. Please check credentials.", "error");
+          }
         } finally {
           setAuthButtonLoading(false);
         }
       } else {
         try {
-          showAuthFeedback("Creating account & sending confirmation notice...", "info");
-          const data = await StepAuth.authSignUp(email, password, fullName);
+          showAuthFeedback("Creating account & sending Resend verification email...", "info");
+          await StepAuth.authSignUp(email, password, fullName);
           
           if (verifyEmailDisplay) verifyEmailDisplay.innerText = email;
-
-          // If user object indicates email confirmation is pending
-          if (data.user && !data.session) {
-            switchView("verify");
-          } else {
-            // Auto-confirmed or direct session
-            showAuthFeedback("✓ Account created successfully! Logging you in...", "success");
-            await StepAuth.authSignIn(email, password);
-            setTimeout(async () => {
-              await checkAuthAndDeviceState();
-            }, 800);
-          }
+          switchView("verify");
+          showVerifyFeedback("✓ Confirmation email dispatched via Resend! Please click the link in your email.", "success");
         } catch (err) {
           showAuthFeedback(err.message || "Sign up failed. Please try again.", "error");
         } finally {
@@ -281,19 +293,57 @@ document.addEventListener("DOMContentLoaded", async () => {
       btnCheckVerified.disabled = true;
       btnCheckVerified.innerText = "Verifying...";
       try {
+        const email = verifyEmailDisplay?.innerText || authEmailInput?.value;
         const session = await StepAuth.getStoredSession();
         if (session) {
-          await checkAuthAndDeviceState();
-        } else {
-          // If no stored session, ask user to log in to complete verification check
-          showVerifyFeedback("Please sign in to complete email activation.", "info");
-          setTimeout(() => switchView("auth"), 1200);
+          const authUser = await StepAuth.validateSessionOnServer(session);
+          if (authUser && (authUser.email_confirmed_at || authUser.confirmed_at)) {
+            showVerifyFeedback("✓ Email confirmed! Loading solver...", "success");
+            setTimeout(() => checkAuthAndDeviceState(), 800);
+            return;
+          }
         }
+        
+        // Otherwise switch to sign-in so user can enter password and log in
+        showVerifyFeedback("Account ready! Please sign in to activate your session.", "info");
+        setTimeout(() => {
+          setAuthMode("signin");
+          switchView("auth");
+          if (authEmailInput && email) authEmailInput.value = email;
+          if (authPasswordInput) authPasswordInput.focus();
+        }, 1000);
       } catch (err) {
-        showVerifyFeedback("Email not verified yet. Please check your inbox and click the link.", "error");
+        showVerifyFeedback("Please check your email and click the confirmation link.", "error");
       } finally {
         btnCheckVerified.disabled = false;
         btnCheckVerified.innerText = "✓ I've Verified My Email";
+      }
+    });
+  }
+
+  if (btnInstantVerify) {
+    btnInstantVerify.addEventListener("click", async () => {
+      const email = verifyEmailDisplay?.innerText || authEmailInput?.value;
+      if (!email) {
+        showVerifyFeedback("Please enter your email to activate.", "error");
+        return;
+      }
+      btnInstantVerify.disabled = true;
+      btnInstantVerify.innerText = "Activating...";
+      try {
+        await StepAuth.confirmUserInstantly(email);
+        showVerifyFeedback("✓ Account activated! Please sign in now.", "success");
+        setTimeout(() => {
+          setAuthMode("signin");
+          switchView("auth");
+          if (authEmailInput) authEmailInput.value = email;
+          if (authPasswordInput) authPasswordInput.focus();
+        }, 1200);
+      } catch (err) {
+        showVerifyFeedback(err.message || "Failed to activate.", "error");
+      } finally {
+        btnInstantVerify.disabled = false;
+        btnInstantVerify.innerText = "⚡ Auto-Activate Email (Test Mode)";
       }
     });
   }
@@ -306,10 +356,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
       btnResendVerification.disabled = true;
-      btnResendVerification.innerText = "Sending...";
+      btnResendVerification.innerText = "Sending via Resend...";
       try {
         await StepAuth.requestEmailConfirmationResend(email);
-        showVerifyFeedback("✓ Confirmation email sent! Please check your spam/inbox.", "success");
+        showVerifyFeedback("✓ Confirmation email sent via Resend! Please check your spam/inbox.", "success");
       } catch (err) {
         showVerifyFeedback(err.message || "Failed to resend email.", "error");
       } finally {
@@ -543,14 +593,10 @@ document.addEventListener("DOMContentLoaded", async () => {
             updateSubscriptionUI();
           }, 1000);
         } else {
-          // If banking status is pending, allow user to enter key or check again
-          showPaymentPolling("Payment pending or confirming. You can also paste your activation key below.", false);
-          if (licenseInputContainer) licenseInputContainer.style.display = "flex";
-          if (licenseKeyInput) licenseKeyInput.focus();
+          showPaymentPolling("Payment pending or confirming with Razorpay. Please complete ₹50 and check again.", false);
         }
       } catch (err) {
-        showPaymentPolling("Please enter your activation key below to unlock.", false);
-        if (licenseInputContainer) licenseInputContainer.style.display = "flex";
+        showPaymentPolling("Unable to check status. Please ensure ₹50 payment completed on Razorpay.", false);
       } finally {
         btnManualPaidConfirm.disabled = false;
         btnManualPaidConfirm.innerText = "✓ I've Completed Payment";
@@ -570,60 +616,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function hidePaymentPolling() {
     if (paymentPollingStatus) paymentPollingStatus.style.display = "none";
-  }
-
-  // Backup Manual Activation Key Toggle & Trigger
-  if (btnToggleLicenseInput && licenseInputContainer) {
-    btnToggleLicenseInput.addEventListener("click", () => {
-      const isHidden = licenseInputContainer.style.display === "none";
-      licenseInputContainer.style.display = isHidden ? "flex" : "none";
-      if (isHidden && licenseKeyInput) {
-        licenseKeyInput.focus();
-      }
-    });
-  }
-
-  if (btnActivateLicense && licenseKeyInput) {
-    btnActivateLicense.addEventListener("click", async () => {
-      const rawKey = licenseKeyInput.value.trim();
-      if (!rawKey) {
-        showLicenseFeedback("Please enter your activation key.", "error");
-        return;
-      }
-
-      btnActivateLicense.disabled = true;
-      btnActivateLicense.innerText = "Verifying...";
-      showLicenseFeedback("Validating activation key...", "info");
-
-      try {
-        const res = await chrome.runtime.sendMessage({
-          action: "ACTIVATE_LICENSE_KEY",
-          licenseKey: rawKey
-        });
-
-        if (!res || !res.success) {
-          throw new Error(res?.error || "Invalid key. Please check your key.");
-        }
-
-        showLicenseFeedback("✓ Lifetime access unlocked successfully!", "success");
-        setTimeout(() => {
-          updateSubscriptionUI();
-        }, 1200);
-
-      } catch (err) {
-        showLicenseFeedback(err.message, "error");
-      } finally {
-        btnActivateLicense.disabled = false;
-        btnActivateLicense.innerText = "Activate";
-      }
-    });
-  }
-
-  function showLicenseFeedback(text, type) {
-    if (!licenseFeedback) return;
-    licenseFeedback.innerText = text;
-    licenseFeedback.className = `license-feedback ${type}`;
-    licenseFeedback.style.display = "block";
   }
 
   // -------------------------------------------------------------

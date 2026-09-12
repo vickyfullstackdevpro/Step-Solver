@@ -94,7 +94,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === "SEND_RESEND_VERIFICATION") {
-    StepAuth.sendResendVerificationNotice(request.recipientEmail, request.userName)
+    StepAuth.sendResendVerificationEmail(request.recipientEmail, request.userName, request.actionLink, request.emailOtp)
       .then((data) => sendResponse({ success: true, data }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
@@ -102,13 +102,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === "GET_SUBSCRIPTION_STATUS") {
     getSubscriptionStatus()
-      .then((res) => sendResponse({ success: true, ...res }))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
-
-  if (request.action === "ACTIVATE_LICENSE_KEY") {
-    handleActivateLicenseKey(request.licenseKey)
       .then((res) => sendResponse({ success: true, ...res }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
@@ -1134,16 +1127,13 @@ async function getSubscriptionStatus() {
 
   // If user profile from Supabase explicitly indicates NOT paid
   if (data.userProfile && data.userProfile.payment_status !== "paid") {
-    const hasValidKey = data.licenseKey && validateLicenseKey(data.licenseKey);
-    if (!hasValidKey) {
-      if (data.isLifetimeActive) {
-        await chrome.storage.local.set({ isLifetimeActive: false, paidViaRazorpay: false });
-        data.isLifetimeActive = false;
-      }
+    if (data.isLifetimeActive || data.paidViaRazorpay) {
+      await chrome.storage.local.set({ isLifetimeActive: false, paidViaRazorpay: false });
+      data.isLifetimeActive = false;
     }
   }
 
-  if (data.isLifetimeActive === true) {
+  if (data.isLifetimeActive === true && data.paidViaRazorpay === true) {
     return {
       status: "LIFETIME_ACTIVE",
       isLifetime: true,
@@ -1191,50 +1181,4 @@ async function getSubscriptionStatus() {
   };
 }
 
-function validateLicenseKey(rawKey) {
-  if (!rawKey || typeof rawKey !== "string") return false;
-  const key = rawKey.trim().toUpperCase().replace(/\s+/g, "");
 
-  // 1. Direct VIP / Master Keys
-  const masterKeys = [
-    "STEP-LIFETIME-VIP",
-    "STEP-PRO-2026",
-    "VIGNESH-VIP-ACCESS",
-    "STEP-SOLVER-PRO",
-    "STEP-LIFE-UNLIMITED"
-  ];
-  if (masterKeys.includes(key)) return true;
-
-  // 2. Pattern A: STEP-LIFE-[alphanumeric 4-16 chars] (e.g. STEP-LIFE-USER50, STEP-LIFE-987654)
-  if (/^STEP-LIFE-[A-Z0-9]{4,16}$/.test(key)) return true;
-
-  // 3. Pattern B: STEP-[4 chars]-[4 chars]-[4 chars] (e.g. STEP-ABCD-1234-EFGH)
-  if (/^STEP-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)) return true;
-
-  return false;
-}
-
-async function handleActivateLicenseKey(rawKey) {
-  if (!rawKey || typeof rawKey !== "string" || !rawKey.trim()) {
-    throw new Error("Please enter an activation key.");
-  }
-
-  const normalized = rawKey.trim().toUpperCase();
-  const isValid = validateLicenseKey(normalized);
-
-  if (!isValid) {
-    throw new Error("Invalid activation key. Please verify your key or purchase lifetime access.");
-  }
-
-  await chrome.storage.local.set({
-    isLifetimeActive: true,
-    licenseKey: normalized,
-    lifetimeActivatedAt: Date.now()
-  });
-
-  return {
-    success: true,
-    message: "Lifetime access activated successfully! Unlimited solving unlocked.",
-    isLifetime: true
-  };
-}

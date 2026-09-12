@@ -14,16 +14,33 @@ const AUTH_CONFIG = {
 };
 
 // -------------------------------------------------------------
-// 1. Device Identity Management (Single-Device Concurrency)
+// 1. Device Identity & Friendly Name Management
 // -------------------------------------------------------------
 async function getOrCreateDeviceId() {
   const data = await chrome.storage.local.get(["extensionDeviceId"]);
-  if (data.extensionDeviceId) {
+  if (data.extensionDeviceId && typeof data.extensionDeviceId === "string" && data.extensionDeviceId.length > 5) {
     return data.extensionDeviceId;
   }
-  const newDeviceId = "device_" + Math.random().toString(36).substring(2, 12) + "_" + Date.now().toString(36);
+  const newDeviceId = "dev_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now().toString(36);
   await chrome.storage.local.set({ extensionDeviceId: newDeviceId });
   return newDeviceId;
+}
+
+function getDeviceFriendlyName() {
+  const ua = (typeof navigator !== "undefined" && navigator.userAgent) ? navigator.userAgent : "";
+  let os = "PC";
+  if (ua.includes("Win")) os = "Windows PC";
+  else if (ua.includes("Mac")) os = "Mac";
+  else if (ua.includes("Linux")) os = "Linux PC";
+  else if (ua.includes("Android")) os = "Android";
+  else if (ua.includes("iPhone") || ua.includes("iPad")) os = "iOS";
+
+  let browser = "Browser";
+  if (ua.includes("Edg/")) browser = "Edge";
+  else if (ua.includes("Chrome/")) browser = "Chrome";
+  else if (ua.includes("Firefox/")) browser = "Firefox";
+
+  return `${os} (${browser})`;
 }
 
 // -------------------------------------------------------------
@@ -61,19 +78,33 @@ async function authSignUp(email, password, fullName = "") {
   const cleanEmail = email.trim().toLowerCase();
   const cleanName = (fullName || "").trim() || cleanEmail.split("@")[0];
 
-  const payload = {
-    email: cleanEmail,
-    password,
-    data: { full_name: cleanName }
-  };
-
-  const data = await supabaseRequest("/auth/v1/signup", {
+  // 1. Generate verification link using Supabase Admin API
+  // This creates the user in auth.users WITHOUT Supabase's built-in mailer,
+  // completely avoiding Supabase's 3-emails/hour rate limit!
+  const linkRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/admin/generate_link`, {
     method: "POST",
-    body: JSON.stringify(payload)
+    headers: {
+      "apikey": AUTH_CONFIG.supabaseSecretKey,
+      "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      type: "signup",
+      email: cleanEmail,
+      password: password,
+      data: { full_name: cleanName }
+    })
   });
 
-  // Ensure profile row exists in public.profiles table using secret key
-  const userId = data.id || data.user?.id;
+  const linkData = await linkRes.json().catch(() => ({}));
+  if (!linkRes.ok) {
+    const msg = linkData.message || linkData.msg || "Failed to create account.";
+    throw new Error(msg);
+  }
+
+  const userId = linkData.id;
+
+  // 2. Ensure profile row exists in public.profiles table
   if (userId) {
     try {
       await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles`, {
@@ -97,10 +128,19 @@ async function authSignUp(email, password, fullName = "") {
     }
   }
 
-  // Dispatch Welcome / Verification Notice via Resend
-  sendResendVerificationNotice(cleanEmail, cleanName).catch(() => {});
+  // 3. Dispatch Email Confirmation via Resend API
+  const resendResult = await sendResendVerificationEmail(
+    cleanEmail,
+    cleanName,
+    linkData.action_link || "",
+    linkData.email_otp || ""
+  );
 
-  return data;
+  return {
+    user: linkData,
+    userId: userId,
+    resend: resendResult
+  };
 }
 
 async function authSignIn(email, password) {
@@ -117,13 +157,23 @@ async function authSignIn(email, password) {
     body: JSON.stringify(payload)
   });
 
+  // Check if email has been verified
+  const user = data.user;
+  if (user && !user.email_confirmed_at && !user.confirmed_at) {
+    const unverifiedErr = new Error("Please verify your email address to log in.");
+    unverifiedErr.code = "EMAIL_NOT_CONFIRMED";
+    unverifiedErr.email = cleanEmail;
+    throw unverifiedErr;
+  }
+
   const session = await saveSession(data);
   const deviceId = await getOrCreateDeviceId();
+  const deviceName = getDeviceFriendlyName();
 
-  // Register device session on server atomically
-  await registerDeviceOnServer(session.access_token, deviceId);
+  // Register device session on server atomically (no duplicates)
+  await registerDeviceOnServer(session.user.id, deviceId, deviceName);
 
-  // Sync profile data (payment status & trial start time)
+  // Sync profile data (payment status & trial start time) from database
   await syncUserProfile(session);
 
   return data;
@@ -131,12 +181,41 @@ async function authSignIn(email, password) {
 
 async function authSignOut() {
   const session = await getStoredSession();
-  if (session?.access_token) {
-    supabaseRequest("/auth/v1/logout", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${session.access_token}` }
-    }).catch(() => {});
+  if (session?.user?.id) {
+    const deviceId = await getOrCreateDeviceId();
+    try {
+      // Clear current_device_id in profiles so the lock is cleanly released
+      await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}&current_device_id=eq.${deviceId}`, {
+        method: "PATCH",
+        headers: {
+          "apikey": AUTH_CONFIG.supabaseSecretKey,
+          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ current_device_id: null })
+      });
+
+      // Mark this device session as inactive in device_sessions
+      await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions?user_id=eq.${session.user.id}&device_id=eq.${deviceId}`, {
+        method: "PATCH",
+        headers: {
+          "apikey": AUTH_CONFIG.supabaseSecretKey,
+          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ is_active: false, revoked_at: new Date().toISOString() })
+      });
+    } catch (_) {}
+
+    if (session.access_token) {
+      supabaseRequest("/auth/v1/logout", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${session.access_token}` }
+      }).catch(() => {});
+    }
   }
+
+  // Clear local session and access flags, but retain extensionDeviceId
   await chrome.storage.local.remove([
     "supabaseSession",
     "isLoggedIn",
@@ -146,6 +225,7 @@ async function authSignOut() {
     "activePaymentLinkId",
     "pendingPaymentVerification"
   ]);
+
   return { success: true };
 }
 
@@ -168,17 +248,61 @@ async function getStoredSession() {
   return data.supabaseSession || null;
 }
 
-// -------------------------------------------------------------
-// 4. User Profile & Cloud Trial / Payment Sync
-// -------------------------------------------------------------
-async function getUserProfile(accessToken, userId) {
-  if (!accessToken || !userId) return null;
+// Check session validity directly on Supabase server (handles expired tokens and user deletion)
+async function validateSessionOnServer(session) {
+  if (!session?.access_token) return null;
 
   try {
-    const profiles = await supabaseRequest(`/rest/v1/profiles?id=eq.${userId}&select=*`, {
-      method: "GET",
-      headers: { "Authorization": `Bearer ${accessToken}` }
+    const res = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/user`, {
+      headers: {
+        "apikey": AUTH_CONFIG.supabaseAnonKey,
+        "Authorization": `Bearer ${session.access_token}`
+      }
     });
+
+    if (res.ok) {
+      const user = await res.json();
+      return user;
+    }
+
+    // If access token expired, attempt automatic refresh
+    if (session.refresh_token) {
+      const refreshRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+        method: "POST",
+        headers: {
+          "apikey": AUTH_CONFIG.supabaseAnonKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ refresh_token: session.refresh_token })
+      });
+
+      if (refreshRes.ok) {
+        const newSession = await refreshRes.json();
+        await saveSession(newSession);
+        return newSession.user;
+      }
+    }
+
+    return null;
+  } catch (err) {
+    console.warn("[Auth] validateSessionOnServer warning:", err.message);
+    return session.user || null;
+  }
+}
+
+// -------------------------------------------------------------
+// 4. User Profile & Cloud Trial / Payment Sync (Authoritative)
+// -------------------------------------------------------------
+async function getUserProfile(accessToken, userId) {
+  if (!userId) return null;
+
+  try {
+    const profiles = await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${userId}&select=*`, {
+      headers: {
+        "apikey": AUTH_CONFIG.supabaseSecretKey,
+        "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`
+      }
+    }).then(r => r.json());
 
     if (Array.isArray(profiles) && profiles.length > 0) {
       await chrome.storage.local.set({ userProfile: profiles[0] });
@@ -192,12 +316,12 @@ async function getUserProfile(accessToken, userId) {
 }
 
 async function syncUserProfile(session) {
-  if (!session?.access_token || !session?.user?.id) return null;
+  if (!session?.user?.id) return null;
 
   const profile = await getUserProfile(session.access_token, session.user.id);
   if (!profile) return null;
 
-  // 1. Sync Lifetime Payment Status
+  // 1. Sync Lifetime Payment Status with Server DB (Bidirectional)
   if (profile.payment_status === "paid") {
     await chrome.storage.local.set({
       isLifetimeActive: true,
@@ -206,14 +330,11 @@ async function syncUserProfile(session) {
     });
   } else {
     // Database profile is unpaid, refunded, or revoked
-    const local = await chrome.storage.local.get(["licenseKey"]);
-    if (!local.licenseKey) {
-      await chrome.storage.local.set({
-        isLifetimeActive: false,
-        paidViaRazorpay: false
-      });
-      await chrome.storage.local.remove(["activePaymentLinkId", "pendingPaymentVerification"]);
-    }
+    await chrome.storage.local.set({
+      isLifetimeActive: false,
+      paidViaRazorpay: false
+    });
+    await chrome.storage.local.remove(["activePaymentLinkId", "pendingPaymentVerification"]);
   }
 
   // 2. Sync Trial Start Timestamp (Server authoritative)
@@ -230,9 +351,13 @@ async function syncUserProfile(session) {
     await chrome.storage.local.set({ trialStartedAt: trialMs });
 
     // Update server profile with trial start date
-    supabaseRequest(`/rest/v1/profiles?id=eq.${session.user.id}`, {
+    fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
       method: "PATCH",
-      headers: { "Authorization": `Bearer ${session.access_token}` },
+      headers: {
+        "apikey": AUTH_CONFIG.supabaseSecretKey,
+        "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify({ trial_started_at: isoDate })
     }).catch(() => {});
   }
@@ -241,50 +366,120 @@ async function syncUserProfile(session) {
 }
 
 // -------------------------------------------------------------
-// 5. Single-Device Concurrency Lock
+// 5. Single-Device Concurrency Lock (Atomic & Deduplicated)
 // -------------------------------------------------------------
-async function registerDeviceOnServer(accessToken, deviceId) {
-  if (!accessToken || !deviceId) return null;
+async function registerDeviceOnServer(userId, deviceId, deviceName) {
+  if (!userId || !deviceId) return null;
+  const name = deviceName || getDeviceFriendlyName();
 
   try {
-    const res = await supabaseRequest("/rest/v1/rpc/register_active_device", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${accessToken}` },
+    // 1. Update profiles table with current_device_id and clean friendly name
+    await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
+      method: "PATCH",
+      headers: {
+        "apikey": AUTH_CONFIG.supabaseSecretKey,
+        "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify({
-        p_device_id: deviceId,
-        p_session_token_hash: "hash_" + deviceId.slice(0, 10),
-        p_device_name: "Step Solver Chrome / Edge Extension"
+        current_device_id: deviceId,
+        last_device_name: name,
+        last_active_at: new Date().toISOString()
       })
     });
-    return res;
+
+    // 2. Mark other devices for this user as inactive in device_sessions
+    await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions?user_id=eq.${userId}&device_id=neq.${deviceId}`, {
+      method: "PATCH",
+      headers: {
+        "apikey": AUTH_CONFIG.supabaseSecretKey,
+        "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        is_active: false,
+        revoked_at: new Date().toISOString()
+      })
+    }).catch(() => {});
+
+    // 3. Upsert session for this device without creating duplicate rows
+    const checkRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions?user_id=eq.${userId}&device_id=eq.${deviceId}`, {
+      headers: {
+        "apikey": AUTH_CONFIG.supabaseSecretKey,
+        "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`
+      }
+    });
+
+    const existing = await checkRes.json().catch(() => []);
+    if (Array.isArray(existing) && existing.length > 0) {
+      // Update existing session
+      await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions?user_id=eq.${userId}&device_id=eq.${deviceId}`, {
+        method: "PATCH",
+        headers: {
+          "apikey": AUTH_CONFIG.supabaseSecretKey,
+          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          device_info: name,
+          is_active: true,
+          revoked_at: null
+        })
+      });
+    } else {
+      // Insert initial session for this device
+      await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions`, {
+        method: "POST",
+        headers: {
+          "apikey": AUTH_CONFIG.supabaseSecretKey,
+          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          device_id: deviceId,
+          device_info: name,
+          is_active: true
+        })
+      });
+    }
+
+    return { success: true };
   } catch (err) {
-    console.warn("[Auth] register_active_device notice:", err.message);
+    console.warn("[Auth] registerDeviceOnServer notice:", err.message);
     return null;
   }
 }
 
-// Check if this machine is currently the active device on the profile
+// Check if this machine is currently the active device on the Supabase profile
 async function verifyDeviceConcurrency() {
   const session = await getStoredSession();
-  if (!session?.access_token || !session?.user?.id) {
+  if (!session?.user?.id) {
     return { isAuthenticated: false, isDeviceActive: false };
   }
 
   const currentDeviceId = await getOrCreateDeviceId();
+  // Fetch authoritative profile directly from database
   const profile = await getUserProfile(session.access_token, session.user.id);
 
   if (!profile) {
     return { isAuthenticated: true, isDeviceActive: true, profile: null };
   }
 
-  // If server has a current_device_id and it doesn't match this machine's deviceId
+  // If server has a current_device_id set, and it doesn't match this machine's deviceId
   if (profile.current_device_id && profile.current_device_id !== currentDeviceId) {
     return {
       isAuthenticated: true,
       isDeviceActive: false,
       conflictDeviceId: profile.current_device_id,
+      conflictDeviceName: profile.last_device_name || "Another Device",
       profile
     };
+  }
+
+  // If profile current_device_id is null or already matches, ensure this device is registered
+  if (!profile.current_device_id) {
+    await registerDeviceOnServer(session.user.id, currentDeviceId, getDeviceFriendlyName());
   }
 
   return {
@@ -297,143 +492,215 @@ async function verifyDeviceConcurrency() {
 // Claim this device as the single active device (atomic takeover)
 async function claimThisDevice() {
   const session = await getStoredSession();
-  if (!session?.access_token) throw new Error("Please log in first.");
+  if (!session?.user?.id) throw new Error("Please log in first.");
 
   const deviceId = await getOrCreateDeviceId();
-  await registerDeviceOnServer(session.access_token, deviceId);
+  const deviceName = getDeviceFriendlyName();
+  await registerDeviceOnServer(session.user.id, deviceId, deviceName);
   await getUserProfile(session.access_token, session.user.id);
   return { success: true, deviceId };
 }
 
 // -------------------------------------------------------------
-// 6. Resend Email Verification Notice & Resend Triggers
+// 6. Resend Email Verification Delivery & Direct Admin Triggers
 // -------------------------------------------------------------
-async function sendResendVerificationNotice(recipientEmail, userName = "Student") {
-  if (!AUTH_CONFIG.resendApiKey || !recipientEmail) return;
+async function sendResendVerificationEmail(recipientEmail, userName = "Student", actionLink = "", emailOtp = "") {
+  if (!AUTH_CONFIG.resendApiKey || !recipientEmail) return { success: false };
 
-  // If in popup or content script (window defined), delegate to background service worker to bypass CORS
+  // If in popup or content script, delegate to background service worker to bypass CORS
   if (typeof window !== "undefined" && chrome.runtime?.sendMessage) {
-    chrome.runtime.sendMessage({
-      action: "SEND_RESEND_VERIFICATION",
-      recipientEmail,
-      userName
-    }).catch(() => {});
-    return;
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({
+        action: "SEND_RESEND_VERIFICATION",
+        recipientEmail,
+        userName,
+        actionLink,
+        emailOtp
+      }, (res) => resolve(res || { success: false }));
+    });
   }
 
-  const emailPayload = (fromAddress) => ({
-    from: `Step Solver <${fromAddress}>`,
-    to: [recipientEmail],
-    subject: "Step Solver - Welcome & Email Confirmation",
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 520px; margin: auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 10px; background: #ffffff;">
-        <div style="text-align: center; margin-bottom: 20px;">
-          <h1 style="color: #6366f1; margin: 0; font-size: 24px;">Step Solver AI</h1>
-          <p style="color: #64748b; font-size: 13px; margin-top: 4px;">Live AI Assessment Assistant</p>
-        </div>
-        <p style="color: #1e293b; font-size: 15px; line-height: 1.5;">Hi ${userName},</p>
-        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
-          Welcome! Please verify your email address to activate your account and start your <strong>30-minute free trial</strong> with full AI solving capabilities.
-        </p>
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin: 18px 0;">
-          <p style="margin: 0; color: #475569; font-size: 13px;">
-            ⚡ <strong>What's included in your trial:</strong><br>
-            • Live on-screen question detection (MCQs, Cloze, Rearrange, Writing, Speaking)<br>
-            • Gemini Flash AI solving with automatic model selection<br>
-            • Multi-API key pool with instant failover
-          </p>
-        </div>
-        <p style="color: #94a3b8; font-size: 12px; margin-top: 24px;">
-          If you did not sign up for Step Solver, please ignore this email.
+  const emailHtml = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: auto; padding: 28px 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #6366f1; margin: 0; font-size: 24px; font-weight: 700;">Step Solver AI</h1>
+        <p style="color: #64748b; font-size: 13px; margin-top: 4px;">Live AI Assessment Assistant</p>
+      </div>
+      <p style="color: #1e293b; font-size: 15px; font-weight: 600;">Hi ${userName},</p>
+      <p style="color: #475569; font-size: 14px; line-height: 1.6;">
+        Welcome to Step Solver! Please confirm your email address to activate your account and start your <strong>30-minute free trial</strong> with full AI solving capabilities.
+      </p>
+      ${actionLink ? `
+      <div style="text-align: center; margin: 26px 0;">
+        <a href="${actionLink}" target="_blank" style="background: linear-gradient(135deg, #6366f1, #4f46e5); color: #ffffff; text-decoration: none; padding: 13px 30px; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
+          ✓ Confirm My Email
+        </a>
+      </div>
+      ` : ''}
+      ${emailOtp ? `
+      <div style="background: #f1f5f9; border-radius: 8px; padding: 12px; text-align: center; margin: 16px 0;">
+        <span style="font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Verification Code</span>
+        <div style="font-size: 22px; font-weight: 700; color: #1e293b; letter-spacing: 4px; margin-top: 4px;">${emailOtp}</div>
+      </div>
+      ` : ''}
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin: 18px 0;">
+        <p style="margin: 0; color: #475569; font-size: 13px; line-height: 1.5;">
+          ⚡ <strong>Your 30-minute trial includes:</strong><br>
+          • Live question detection (MCQs, Cloze, Rearrange, Writing & Speaking)<br>
+          • Google Gemini Flash AI reasoning with key failover<br>
+          • Single-device secure concurrency lock
         </p>
       </div>
-    `
-  });
+      <p style="color: #94a3b8; font-size: 12px; margin-top: 20px; text-align: center;">
+        If you didn't create a Step Solver account, you can safely ignore this email.
+      </p>
+    </div>
+  `;
 
-  // Try custom sender first, fallback gracefully if domain is unverified on Resend
+  let lastError = "";
+
   try {
+    // 1. Try sending from custom sender
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${AUTH_CONFIG.resendApiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(emailPayload(AUTH_CONFIG.resendSender))
+      body: JSON.stringify({
+        from: `Step Solver <${AUTH_CONFIG.resendSender}>`,
+        to: [recipientEmail],
+        subject: "Verify Your Email - Step Solver",
+        html: emailHtml
+      })
     });
 
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      if (res.status === 403 || (errData.message && errData.message.includes("domain is not verified"))) {
-        console.log("[Resend] Retrying with default fallback sender...");
-        await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${AUTH_CONFIG.resendApiKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(emailPayload(AUTH_CONFIG.resendFallbackSender))
-        });
-      }
+    const resData = await res.json().catch(() => ({}));
+    if (res.ok) {
+      return { success: true, id: resData.id };
     }
+
+    lastError = resData.message || `Resend error ${res.status}`;
+
+    // 2. Try default fallback sender onboarding@resend.dev
+    const fallbackRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${AUTH_CONFIG.resendApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: `Step Solver <${AUTH_CONFIG.resendFallbackSender}>`,
+        to: [recipientEmail],
+        subject: "Verify Your Email - Step Solver",
+        html: emailHtml
+      })
+    });
+
+    const fbData = await fallbackRes.json().catch(() => ({}));
+    if (fallbackRes.ok) {
+      return { success: true, id: fbData.id };
+    }
+
+    lastError = fbData.message || lastError;
   } catch (err) {
-    console.warn("[Resend] Notice email dispatch error:", err.message);
+    lastError = err.message;
   }
+
+  return { success: false, error: lastError };
 }
 
-// Resend confirmation link via Supabase Auth + Resend email
+// Resend confirmation link via Admin API + Resend (Zero Supabase email rate limit)
 async function requestEmailConfirmationResend(email) {
   if (!email) throw new Error("Email is required.");
   const cleanEmail = email.trim().toLowerCase();
 
-  // 1. Trigger Supabase official confirmation email
-  await supabaseRequest("/auth/v1/resend", {
+  const linkRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/admin/generate_link`, {
     method: "POST",
+    headers: {
+      "apikey": AUTH_CONFIG.supabaseSecretKey,
+      "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
+      "Content-Type": "application/json"
+    },
     body: JSON.stringify({
       type: "signup",
       email: cleanEmail
     })
   });
 
-  // 2. Also trigger Resend reminder
-  sendResendVerificationNotice(cleanEmail).catch(() => {});
+  const linkData = await linkRes.json().catch(() => ({}));
+  const actionLink = linkData.action_link || "";
+  const emailOtp = linkData.email_otp || "";
 
-  return { success: true, message: "Verification link sent! Please check your inbox." };
+  return sendResendVerificationEmail(cleanEmail, "Student", actionLink, emailOtp);
+}
+
+// Instant test mode confirmation (Bypasses email delivery when testing before domain DNS verification)
+async function confirmUserInstantly(email) {
+  if (!email) throw new Error("Email is required.");
+  const cleanEmail = email.trim().toLowerCase();
+
+  const usersRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/admin/users`, {
+    headers: {
+      "apikey": AUTH_CONFIG.supabaseSecretKey,
+      "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`
+    }
+  });
+
+  const data = await usersRes.json();
+  const user = (data.users || []).find(u => u.email === cleanEmail);
+  if (!user) throw new Error("User account not found.");
+
+  const patchRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/admin/users/${user.id}`, {
+    method: "PUT",
+    headers: {
+      "apikey": AUTH_CONFIG.supabaseSecretKey,
+      "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ email_confirm: true })
+  });
+
+  if (!patchRes.ok) {
+    const err = await patchRes.json().catch(() => ({}));
+    throw new Error(err.message || "Failed to confirm account.");
+  }
+
+  return { success: true, userId: user.id };
 }
 
 // -------------------------------------------------------------
 // 7. Razorpay ₹50 Hosted Payment Link Engine
 // -------------------------------------------------------------
-async function createRazorpayPaymentLink(customerEmail, customerName = "Step Solver User") {
-  // If in browser page/popup context (window defined), delegate to background service worker
+async function createRazorpayPaymentLink(userEmail, userName = "") {
+  // If in popup/content window, delegate to background service worker
   if (typeof window !== "undefined" && chrome.runtime?.sendMessage) {
-    try {
-      const res = await chrome.runtime.sendMessage({
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({
         action: "CREATE_RAZORPAY_PAYMENT_LINK",
-        customerEmail,
-        customerName
+        userEmail,
+        userName
+      }, (res) => {
+        if (res && res.success && res.data) {
+          resolve(res.data);
+        } else {
+          resolve({
+            paymentLinkId: "plink_Tb2fkbf9vmJ4ka",
+            paymentUrl: AUTH_CONFIG.razorpayHostedLink,
+            status: "created"
+          });
+        }
       });
-      if (res && res.success && res.data?.paymentUrl) {
-        return res.data;
-      }
-    } catch (msgErr) {
-      console.warn("[Payment] Background message notice, using direct hosted link:", msgErr.message);
-    }
-
-    const fallbackUrl = AUTH_CONFIG.razorpayHostedLink || "https://rzp.io/rzp/Wk3xyuB";
-    return {
-      paymentLinkId: "plink_Tb2fkbf9vmJ4ka",
-      paymentUrl: fallbackUrl,
-      status: "created"
-    };
+    });
   }
 
-  // --- Background Service Worker Execution with Fallback ---
-  try {
-    const authHeader = "Basic " + btoa(`${AUTH_CONFIG.razorpayKeyId}:${AUTH_CONFIG.razorpayKeySecret}`);
-    const deviceId = await getOrCreateDeviceId();
-    const session = await getStoredSession();
-    const userId = session?.user?.id || "guest";
+  const authHeader = "Basic " + btoa(`${AUTH_CONFIG.razorpayKeyId}:${AUTH_CONFIG.razorpayKeySecret}`);
+  const referenceId = "ref_" + Date.now().toString(36);
+  const cleanEmail = (userEmail || "").trim() || "customer@example.com";
+  const cleanName = (userName || "").trim() || "Student";
+  const deviceId = await getOrCreateDeviceId();
 
+  try {
     const response = await fetch("https://api.razorpay.com/v1/payment_links", {
       method: "POST",
       headers: {
@@ -441,20 +708,24 @@ async function createRazorpayPaymentLink(customerEmail, customerName = "Step Sol
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        amount: AUTH_CONFIG.paymentAmountInr * 100, // 5000 paise = ₹50.00
+        amount: AUTH_CONFIG.paymentAmountInr * 100, // 5000 paise = ₹50.00 INR
         currency: "INR",
         accept_partial: false,
-        description: "Step Solver Lifetime Pro License (Unlimited AI Solving)",
+        reference_id: referenceId,
+        description: "Step Solver Lifetime Pro License",
         customer: {
-          name: customerName || "Step Solver User",
-          email: customerEmail
+          name: cleanName,
+          email: cleanEmail
         },
-        notify: { sms: false, email: true },
+        notify: {
+          sms: false,
+          email: true
+        },
         reminder_enable: false,
         notes: {
-          app: "Step Solver",
-          user_id: userId,
-          device_id: deviceId
+          product: "Step Solver Lifetime Pro",
+          email: cleanEmail,
+          deviceId: deviceId
         }
       })
     });
@@ -473,10 +744,10 @@ async function createRazorpayPaymentLink(customerEmail, customerName = "Step Sol
       };
     }
   } catch (err) {
-    console.warn("[Razorpay] Dynamic API notice, using active hosted payment link:", err.message);
+    console.warn("[Razorpay] Notice, using active hosted payment link:", err.message);
   }
 
-  // Guaranteed fallback to verified Razorpay hosted link
+  // Fallback to verified Razorpay hosted link
   const fallbackUrl = AUTH_CONFIG.razorpayHostedLink || "https://rzp.io/rzp/Wk3xyuB";
   await chrome.storage.local.set({
     activePaymentLinkId: "plink_Tb2fkbf9vmJ4ka",
@@ -491,27 +762,28 @@ async function createRazorpayPaymentLink(customerEmail, customerName = "Step Sol
   };
 }
 
-// Verify payment status with Razorpay & update Supabase database
 async function verifyRazorpayPaymentLink(paymentLinkId) {
   if (!paymentLinkId) return { isPaid: false };
 
-  // If in browser page/popup context (window defined), delegate to background service worker
+  // If in popup/content window, delegate to background service worker
   if (typeof window !== "undefined" && chrome.runtime?.sendMessage) {
-    try {
-      const res = await chrome.runtime.sendMessage({
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({
         action: "VERIFY_RAZORPAY_PAYMENT_LINK",
         paymentLinkId
+      }, (res) => {
+        if (res && res.success && res.data) {
+          resolve(res.data);
+        } else {
+          resolve({ isPaid: false });
+        }
       });
-      if (res && res.success && res.data) {
-        return res.data;
-      }
-    } catch (_) {}
-    return { isPaid: false };
+    });
   }
 
-  // --- Background Service Worker Execution ---
+  const authHeader = "Basic " + btoa(`${AUTH_CONFIG.razorpayKeyId}:${AUTH_CONFIG.razorpayKeySecret}`);
+
   try {
-    const authHeader = "Basic " + btoa(`${AUTH_CONFIG.razorpayKeyId}:${AUTH_CONFIG.razorpayKeySecret}`);
     const response = await fetch(`https://api.razorpay.com/v1/payment_links/${paymentLinkId}`, {
       method: "GET",
       headers: { "Authorization": authHeader }
@@ -602,18 +874,21 @@ async function verifyRazorpayPaymentLink(paymentLinkId) {
 const stepAuthExport = {
   CONFIG: AUTH_CONFIG,
   getOrCreateDeviceId,
+  getDeviceFriendlyName,
   authSignUp,
   authSignIn,
   authSignOut,
   saveSession,
   getStoredSession,
+  validateSessionOnServer,
   getUserProfile,
   syncUserProfile,
   registerDeviceOnServer,
   verifyDeviceConcurrency,
   claimThisDevice,
-  sendResendVerificationNotice,
+  sendResendVerificationEmail,
   requestEmailConfirmationResend,
+  confirmUserInstantly,
   createRazorpayPaymentLink,
   verifyRazorpayPaymentLink
 };
@@ -623,4 +898,7 @@ if (typeof window !== "undefined") {
 }
 if (typeof self !== "undefined") {
   self.StepAuth = stepAuthExport;
+}
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { StepAuth: stepAuthExport };
 }
