@@ -16,6 +16,54 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
+// Setup Declarative Net Request rules to eliminate CORS preflight & Origin restrictions for backend APIs
+function setupCorsRules() {
+  if (!chrome.declarativeNetRequest) return;
+  chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: [1001, 1002],
+    addRules: [
+      {
+        id: 1001,
+        priority: 1,
+        action: {
+          type: "modifyHeaders",
+          requestHeaders: [
+            { header: "Origin", operation: "remove" }
+          ],
+          responseHeaders: [
+            { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+            { header: "Access-Control-Allow-Methods", operation: "set", value: "GET, POST, OPTIONS, PUT, DELETE, PATCH" },
+            { header: "Access-Control-Allow-Headers", operation: "set", value: "*" }
+          ]
+        },
+        condition: {
+          urlFilter: "||api.razorpay.com/*"
+        }
+      },
+      {
+        id: 1002,
+        priority: 1,
+        action: {
+          type: "modifyHeaders",
+          requestHeaders: [
+            { header: "Origin", operation: "remove" }
+          ],
+          responseHeaders: [
+            { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+            { header: "Access-Control-Allow-Methods", operation: "set", value: "GET, POST, OPTIONS, PUT, DELETE, PATCH" },
+            { header: "Access-Control-Allow-Headers", operation: "set", value: "*" }
+          ]
+        },
+        condition: {
+          urlFilter: "||api.resend.com/*"
+        }
+      }
+    ]
+  }).catch((err) => console.warn("[DNR] Rule setup notice:", err.message));
+}
+
+setupCorsRules();
+
 // Listen for messages from popup or content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "SOLVE_QUESTION") {
@@ -29,6 +77,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         purchaseUrl: err.purchaseUrl || LIFETIME_PURCHASE_URL
       }));
     return true; // Keep message channel open for async response
+  }
+
+  if (request.action === "CREATE_RAZORPAY_PAYMENT_LINK") {
+    StepAuth.createRazorpayPaymentLink(request.customerEmail, request.customerName)
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "VERIFY_RAZORPAY_PAYMENT_LINK") {
+    StepAuth.verifyRazorpayPaymentLink(request.paymentLinkId)
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "SEND_RESEND_VERIFICATION") {
+    StepAuth.sendResendVerificationNotice(request.recipientEmail, request.userName)
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
   }
 
   if (request.action === "GET_SUBSCRIPTION_STATUS") {

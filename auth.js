@@ -292,6 +292,16 @@ async function claimThisDevice() {
 async function sendResendVerificationNotice(recipientEmail, userName = "Student") {
   if (!AUTH_CONFIG.resendApiKey || !recipientEmail) return;
 
+  // If in popup or content script (window defined), delegate to background service worker to bypass CORS
+  if (typeof window !== "undefined" && chrome.runtime?.sendMessage) {
+    chrome.runtime.sendMessage({
+      action: "SEND_RESEND_VERIFICATION",
+      recipientEmail,
+      userName
+    }).catch(() => {});
+    return;
+  }
+
   const emailPayload = (fromAddress) => ({
     from: `Step Solver <${fromAddress}>`,
     to: [recipientEmail],
@@ -375,6 +385,20 @@ async function requestEmailConfirmationResend(email) {
 // 7. Razorpay ₹50 Hosted Payment Link Engine
 // -------------------------------------------------------------
 async function createRazorpayPaymentLink(customerEmail, customerName = "Step Solver User") {
+  // If in browser page/popup context (window defined), delegate to background service worker to prevent CORS preflight blocks
+  if (typeof window !== "undefined" && chrome.runtime?.sendMessage) {
+    const res = await chrome.runtime.sendMessage({
+      action: "CREATE_RAZORPAY_PAYMENT_LINK",
+      customerEmail,
+      customerName
+    });
+    if (!res || !res.success) {
+      throw new Error(res?.error || "Failed to generate payment link.");
+    }
+    return res.data;
+  }
+
+  // --- Background Service Worker Direct Execution ---
   const authHeader = "Basic " + btoa(`${AUTH_CONFIG.razorpayKeyId}:${AUTH_CONFIG.razorpayKeySecret}`);
   const deviceId = await getOrCreateDeviceId();
   const session = await getStoredSession();
@@ -431,6 +455,19 @@ async function createRazorpayPaymentLink(customerEmail, customerName = "Step Sol
 async function verifyRazorpayPaymentLink(paymentLinkId) {
   if (!paymentLinkId) return { isPaid: false };
 
+  // If in browser page/popup context (window defined), delegate to background service worker
+  if (typeof window !== "undefined" && chrome.runtime?.sendMessage) {
+    const res = await chrome.runtime.sendMessage({
+      action: "VERIFY_RAZORPAY_PAYMENT_LINK",
+      paymentLinkId
+    });
+    if (!res || !res.success) {
+      throw new Error(res?.error || "Failed to check payment status.");
+    }
+    return res.data;
+  }
+
+  // --- Background Service Worker Direct Execution ---
   const authHeader = "Basic " + btoa(`${AUTH_CONFIG.razorpayKeyId}:${AUTH_CONFIG.razorpayKeySecret}`);
   const response = await fetch(`https://api.razorpay.com/v1/payment_links/${paymentLinkId}`, {
     method: "GET",
