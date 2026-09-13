@@ -6,7 +6,6 @@ const AUTH_CONFIG = {
   supabaseSecretKey: "sb_secret_f9KEFGR8LLme-Oo-I__T0g_Ih9eBqyU",
   razorpayKeyId: "rzp_test_Tb2ApErq4IqHZC",
   razorpayKeySecret: "f6Ram7nmvLYIESUXy3Ei5WsK",
-  razorpayHostedLink: "https://rzp.io/rzp/Wk3xyuB",
   senderEmail: "support.vickydevsolutions@gmail.com",
   paymentAmountInr: 50
 };
@@ -75,6 +74,9 @@ async function authSignUp(email, password, fullName = "") {
 
   const cleanEmail = email.trim().toLowerCase();
   const cleanName = (fullName || "").trim() || cleanEmail.split("@")[0];
+  const deviceId = await getOrCreateDeviceId();
+  const deviceName = getDeviceFriendlyName();
+  const nowIso = new Date().toISOString();
 
   // 1. Standard Supabase Sign Up
   // Supabase automatically dispatches the verification email through your configured Google Gmail SMTP!
@@ -89,7 +91,7 @@ async function authSignUp(email, password, fullName = "") {
 
   const userId = data.id || data.user?.id;
 
-  // 2. Ensure profile row exists in public.profiles table
+  // 2. Ensure profile row exists in public.profiles table with device & trial info
   if (userId) {
     try {
       await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles`, {
@@ -105,11 +107,41 @@ async function authSignUp(email, password, fullName = "") {
           email: cleanEmail,
           full_name: cleanName,
           payment_status: "unpaid",
-          trial_started_at: new Date().toISOString()
+          trial_started_at: nowIso,
+          current_device_id: deviceId,
+          last_device_name: deviceName,
+          last_active_at: nowIso
         })
       });
     } catch (err) {
       console.warn("[Auth] Profile initialization notice:", err.message);
+    }
+
+    // 3. Immediately register device session in public.device_sessions table
+    try {
+      await registerDeviceOnServer(userId, deviceId, deviceName);
+    } catch (err) {
+      console.warn("[Auth] Device session initialization notice:", err.message);
+    }
+
+    // 4. Initialize fresh local 30-minute trial and user profile in storage
+    await chrome.storage.local.set({
+      trialStartedAt: Date.now(),
+      userProfile: {
+        id: userId,
+        email: cleanEmail,
+        full_name: cleanName,
+        payment_status: "unpaid",
+        trial_started_at: nowIso,
+        current_device_id: deviceId,
+        last_device_name: deviceName
+      }
+    });
+
+    // 5. If session was returned immediately (e.g. auto-confirmed or active session)
+    if (data.session || data.access_token) {
+      await saveSession(data.session || data);
+      await syncUserProfile(data.session || data);
     }
   }
 
@@ -196,7 +228,8 @@ async function authSignOut() {
     "isLifetimeActive",
     "paidViaRazorpay",
     "activePaymentLinkId",
-    "pendingPaymentVerification"
+    "pendingPaymentVerification",
+    "trialStartedAt"
   ]);
 
   return { success: true };
@@ -312,15 +345,37 @@ async function syncUserProfile(session) {
 
   // 2. Sync Trial Start Timestamp (Server authoritative)
   if (profile.trial_started_at) {
-    const serverTrialMs = new Date(profile.trial_started_at).getTime();
+    let serverTrialMs = new Date(profile.trial_started_at).getTime();
+    const trialDurationMs = 30 * 60 * 1000;
+    const isOverdue = (Date.now() - serverTrialMs) > trialDurationMs;
+    const isFirstTimeSession = profile.last_active_at === profile.created_at || !profile.current_device_id;
+
+    // If trial expired before user could even complete initial login/verification, grant fresh 30 min
+    if (isOverdue && isFirstTimeSession && profile.payment_status !== "paid") {
+      const nowIso = new Date().toISOString();
+      serverTrialMs = Date.now();
+      profile.trial_started_at = nowIso;
+      profile.last_active_at = nowIso;
+
+      fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
+        method: "PATCH",
+        headers: {
+          "apikey": AUTH_CONFIG.supabaseSecretKey,
+          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ trial_started_at: nowIso, last_active_at: nowIso })
+      }).catch(() => {});
+    }
+
     if (!isNaN(serverTrialMs)) {
       await chrome.storage.local.set({ trialStartedAt: serverTrialMs });
     }
   } else {
-    // If not set on server, record current local trial or initialize now
-    const local = await chrome.storage.local.get(["trialStartedAt"]);
-    const trialMs = local.trialStartedAt || Date.now();
+    // If not set on server, initialize fresh trial now
+    const trialMs = Date.now();
     const isoDate = new Date(trialMs).toISOString();
+    profile.trial_started_at = isoDate;
     await chrome.storage.local.set({ trialStartedAt: trialMs });
 
     // Update server profile with trial start date
@@ -331,10 +386,11 @@ async function syncUserProfile(session) {
         "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ trial_started_at: isoDate })
+      body: JSON.stringify({ trial_started_at: isoDate, last_active_at: isoDate })
     }).catch(() => {});
   }
 
+  await chrome.storage.local.set({ userProfile: profile });
   return profile;
 }
 
@@ -499,90 +555,75 @@ async function requestEmailConfirmationResend(email) {
 async function createRazorpayPaymentLink(userEmail, userName = "") {
   // If in popup/content window, delegate to background service worker
   if (typeof window !== "undefined" && chrome.runtime?.sendMessage) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
         action: "CREATE_RAZORPAY_PAYMENT_LINK",
         userEmail,
         userName
       }, (res) => {
-        if (res && res.success && res.data) {
+        if (chrome.runtime.lastError) {
+          return reject(new Error(chrome.runtime.lastError.message));
+        }
+        if (res && res.success && res.data && res.data.paymentUrl) {
           resolve(res.data);
         } else {
-          resolve({
-            paymentLinkId: "plink_Tb2fkbf9vmJ4ka",
-            paymentUrl: AUTH_CONFIG.razorpayHostedLink,
-            status: "created"
-          });
+          reject(new Error(res?.error || "Failed to create payment checkout"));
         }
       });
     });
   }
 
   const authHeader = "Basic " + btoa(`${AUTH_CONFIG.razorpayKeyId}:${AUTH_CONFIG.razorpayKeySecret}`);
-  const referenceId = "ref_" + Date.now().toString(36);
+  const uniqueRef = "ref_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
   const cleanEmail = (userEmail || "").trim() || "customer@example.com";
   const cleanName = (userName || "").trim() || "Student";
   const deviceId = await getOrCreateDeviceId();
 
-  try {
-    const response = await fetch("https://api.razorpay.com/v1/payment_links", {
-      method: "POST",
-      headers: {
-        "Authorization": authHeader,
-        "Content-Type": "application/json"
+  const response = await fetch("https://api.razorpay.com/v1/payment_links", {
+    method: "POST",
+    headers: {
+      "Authorization": authHeader,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      amount: AUTH_CONFIG.paymentAmountInr * 100, // 5000 paise = ₹50.00 INR
+      currency: "INR",
+      accept_partial: false,
+      reference_id: uniqueRef,
+      description: "Step Solver Lifetime Pro License",
+      customer: {
+        name: cleanName,
+        email: cleanEmail
       },
-      body: JSON.stringify({
-        amount: AUTH_CONFIG.paymentAmountInr * 100, // 5000 paise = ₹50.00 INR
-        currency: "INR",
-        accept_partial: false,
-        reference_id: referenceId,
-        description: "Step Solver Lifetime Pro License",
-        customer: {
-          name: cleanName,
-          email: cleanEmail
-        },
-        notify: {
-          sms: false,
-          email: true
-        },
-        reminder_enable: false,
-        notes: {
-          product: "Step Solver Lifetime Pro",
-          email: cleanEmail,
-          deviceId: deviceId
-        }
-      })
-    });
+      notify: {
+        sms: false,
+        email: false
+      },
+      reminder_enable: false,
+      notes: {
+        product: "Step Solver Lifetime Pro",
+        email: cleanEmail,
+        deviceId: deviceId
+      }
+    })
+  });
 
-    const data = await response.json();
-    if (response.ok && data.short_url) {
-      await chrome.storage.local.set({
-        activePaymentLinkId: data.id,
-        activePaymentLinkUrl: data.short_url,
-        activePaymentCreatedAt: Date.now()
-      });
-      return {
-        paymentLinkId: data.id,
-        paymentUrl: data.short_url,
-        status: data.status
-      };
-    }
-  } catch (err) {
-    console.warn("[Razorpay] Notice, using active hosted payment link:", err.message);
+  const data = await response.json();
+  if (!response.ok || !data.short_url) {
+    const errorMsg = data.error?.description || data.error?.message || `Razorpay error (${response.status})`;
+    throw new Error(errorMsg);
   }
 
-  // Fallback to verified Razorpay hosted link
-  const fallbackUrl = AUTH_CONFIG.razorpayHostedLink || "https://rzp.io/rzp/Wk3xyuB";
   await chrome.storage.local.set({
-    activePaymentLinkId: "plink_Tb2fkbf9vmJ4ka",
-    activePaymentLinkUrl: fallbackUrl,
+    activePaymentLinkId: data.id,
+    activePaymentLinkUrl: data.short_url,
     activePaymentCreatedAt: Date.now()
   });
 
   return {
-    paymentLinkId: "plink_Tb2fkbf9vmJ4ka",
-    paymentUrl: fallbackUrl,
-    status: "created"
+    paymentLinkId: data.id,
+    paymentUrl: data.short_url,
+    status: data.status
   };
 }
 

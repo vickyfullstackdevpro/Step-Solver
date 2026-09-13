@@ -62,7 +62,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === "CREATE_RAZORPAY_PAYMENT_LINK") {
-    StepAuth.createRazorpayPaymentLink(request.customerEmail, request.customerName)
+    const email = request.userEmail || request.customerEmail;
+    const name = request.userName || request.customerName;
+    StepAuth.createRazorpayPaymentLink(email, name)
       .then((data) => sendResponse({ success: true, data }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;

@@ -482,32 +482,27 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (btnGetLifetime) {
     btnGetLifetime.addEventListener("click", async () => {
       btnGetLifetime.disabled = true;
-      showPaymentPolling("Opening Razorpay checkout in new tab...");
+      showPaymentPolling("Creating secure Razorpay checkout link...");
 
       try {
         const session = await StepAuth.getStoredSession();
         const userEmail = session?.user?.email || "customer@step-solver.com";
         const userName = session?.user?.user_metadata?.full_name || "Step Solver User";
 
-        let paymentUrl = "https://rzp.io/rzp/Wk3xyuB";
-        let paymentLinkId = "plink_Tb2fkbf9vmJ4ka";
-
-        try {
-          const paymentData = await StepAuth.createRazorpayPaymentLink(userEmail, userName);
-          if (paymentData && paymentData.paymentUrl) {
-            paymentUrl = paymentData.paymentUrl;
-            paymentLinkId = paymentData.paymentLinkId;
-          }
-        } catch (apiErr) {
-          console.warn("[Razorpay] Notice:", apiErr.message);
+        const paymentData = await StepAuth.createRazorpayPaymentLink(userEmail, userName);
+        if (!paymentData || !paymentData.paymentUrl) {
+          throw new Error("Unable to generate payment link. Please check your network connection.");
         }
+
+        const paymentUrl = paymentData.paymentUrl;
+        const paymentLinkId = paymentData.paymentLinkId;
 
         await chrome.storage.local.set({
           pendingPaymentVerification: true,
           activePaymentLinkId: paymentLinkId
         });
 
-        // Open Razorpay hosted payment link in a new browser tab immediately
+        // Open fresh Razorpay hosted payment link in a new browser tab immediately
         chrome.tabs.create({ url: paymentUrl });
 
         showPaymentPolling("Payment tab opened! Complete ₹50 on Razorpay, then click below:");
@@ -515,7 +510,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         // Start polling Razorpay payment status
         if (paymentPollingTimer) clearInterval(paymentPollingTimer);
         let pollAttempts = 0;
-        const maxPollAttempts = 80; // Poll for up to 4 minutes
+        const maxPollAttempts = 100; // Poll for up to 5 minutes
 
         paymentPollingTimer = setInterval(async () => {
           pollAttempts++;
@@ -538,13 +533,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         }, 3000);
 
       } catch (err) {
-        console.warn("[Payment] Launching direct checkout tab:", err.message);
-        await chrome.storage.local.set({
-          pendingPaymentVerification: true,
-          activePaymentLinkId: "plink_Tb2fkbf9vmJ4ka"
-        });
-        chrome.tabs.create({ url: "https://rzp.io/rzp/Wk3xyuB" });
-        showPaymentPolling("Payment tab opened! Complete ₹50 on Razorpay, then click below:");
+        showPaymentPolling(err.message || "Failed to initiate payment. Please try again.", false);
       } finally {
         btnGetLifetime.disabled = false;
       }
@@ -559,7 +548,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       try {
         const stored = await chrome.storage.local.get(["activePaymentLinkId"]);
-        const linkId = stored.activePaymentLinkId || "plink_Tb2fkbf9vmJ4ka";
+        const linkId = stored.activePaymentLinkId;
+        if (!linkId) {
+          showPaymentPolling("No active payment link found. Please click 'Get Lifetime Access' first.", false);
+          return;
+        }
+
         const check = await StepAuth.verifyRazorpayPaymentLink(linkId);
 
         if (check.isPaid) {
