@@ -65,6 +65,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const trialExpiredView = document.getElementById("trial-expired-view");
   const lifetimeActiveView = document.getElementById("lifetime-active-view");
   const btnGetLifetime = document.getElementById("btn-get-lifetime");
+  const btnGetLifetimeTrial = document.getElementById("btn-get-lifetime-trial");
+  const manualPaymentIdInput = document.getElementById("manual-payment-id-input");
+  const btnVerifyPaymentId = document.getElementById("btn-verify-payment-id");
   const paymentPollingStatus = document.getElementById("payment-polling-status");
   const paymentPollingText = document.getElementById("payment-polling-text");
   let authMode = "signin"; // "signin" | "signup"
@@ -147,6 +150,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       // 2. Check and verify pending payment link ONLY if user initiated payment verification
       const storedPay = await chrome.storage.local.get(["activePaymentLinkId", "isLifetimeActive", "pendingPaymentVerification"]);
+      
+      // Auto-purge any obsolete/stale test payment link
+      if (storedPay.activePaymentLinkId && storedPay.activePaymentLinkId.includes("Tb2fkbf9vmJ4ka")) {
+        await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
+        storedPay.activePaymentLinkId = null;
+        storedPay.pendingPaymentVerification = false;
+      }
+
       if (!storedPay.isLifetimeActive && storedPay.activePaymentLinkId && storedPay.pendingPaymentVerification) {
         try {
           const res = await StepAuth.verifyRazorpayPaymentLink(storedPay.activePaymentLinkId);
@@ -479,68 +490,76 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Razorpay Hosted Payment Flow
   const btnManualPaidConfirm = document.getElementById("btn-manual-paid-confirm");
 
-  if (btnGetLifetime) {
-    btnGetLifetime.addEventListener("click", async () => {
-      btnGetLifetime.disabled = true;
-      showPaymentPolling("Creating secure Razorpay checkout link...");
+  async function initiateLifetimeCheckout(triggerBtn) {
+    if (triggerBtn) triggerBtn.disabled = true;
+    showPaymentPolling("Creating secure Razorpay checkout link...");
 
-      try {
-        const session = await StepAuth.getStoredSession();
-        const userEmail = session?.user?.email || "customer@step-solver.com";
-        const userName = session?.user?.user_metadata?.full_name || "Step Solver User";
+    try {
+      const session = await StepAuth.getStoredSession();
+      const userEmail = session?.user?.email || "customer@step-solver.com";
+      const userName = session?.user?.user_metadata?.full_name || "Step Solver User";
 
-        const paymentData = await StepAuth.createRazorpayPaymentLink(userEmail, userName);
-        if (!paymentData || !paymentData.paymentUrl) {
-          throw new Error("Unable to generate payment link. Please check your network connection.");
-        }
-
-        const paymentUrl = paymentData.paymentUrl;
-        const paymentLinkId = paymentData.paymentLinkId;
-
-        await chrome.storage.local.set({
-          pendingPaymentVerification: true,
-          activePaymentLinkId: paymentLinkId
-        });
-
-        // Open fresh Razorpay hosted payment link in a new browser tab immediately
-        chrome.tabs.create({ url: paymentUrl });
-
-        showPaymentPolling("Payment tab opened! Complete ₹50 on Razorpay, then click below:");
-
-        // Start polling Razorpay payment status
-        if (paymentPollingTimer) clearInterval(paymentPollingTimer);
-        let pollAttempts = 0;
-        const maxPollAttempts = 100; // Poll for up to 5 minutes
-
-        paymentPollingTimer = setInterval(async () => {
-          pollAttempts++;
-          try {
-            const check = await StepAuth.verifyRazorpayPaymentLink(paymentLinkId);
-            if (check.isPaid) {
-              clearInterval(paymentPollingTimer);
-              paymentPollingTimer = null;
-              await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
-              showPaymentPolling("✓ Payment confirmed! Lifetime Access Activated!", true);
-              setTimeout(() => {
-                updateSubscriptionUI();
-              }, 1200);
-            } else if (pollAttempts >= maxPollAttempts) {
-              clearInterval(paymentPollingTimer);
-              paymentPollingTimer = null;
-              btnGetLifetime.disabled = false;
-            }
-          } catch (_) {}
-        }, 3000);
-
-      } catch (err) {
-        showPaymentPolling(err.message || "Failed to initiate payment. Please try again.", false);
-      } finally {
-        btnGetLifetime.disabled = false;
+      const paymentData = await StepAuth.createRazorpayPaymentLink(userEmail, userName);
+      if (!paymentData || !paymentData.paymentUrl) {
+        throw new Error("Unable to generate payment link. Please check your network connection.");
       }
-    });
+
+      const paymentUrl = paymentData.paymentUrl;
+      const paymentLinkId = paymentData.paymentLinkId;
+
+      await chrome.storage.local.set({
+        pendingPaymentVerification: true,
+        activePaymentLinkId: paymentLinkId
+      });
+
+      // Open fresh Razorpay hosted payment link in a new browser tab immediately
+      chrome.tabs.create({ url: paymentUrl });
+
+      showPaymentPolling("Payment tab opened! Complete ₹50 on Razorpay, then click below:");
+
+      // Start polling Razorpay payment status
+      if (paymentPollingTimer) clearInterval(paymentPollingTimer);
+      let pollAttempts = 0;
+      const maxPollAttempts = 100; // Poll for up to 5 minutes
+
+      paymentPollingTimer = setInterval(async () => {
+        pollAttempts++;
+        try {
+          const check = await StepAuth.verifyRazorpayPaymentLink(paymentLinkId);
+          if (check.isPaid) {
+            clearInterval(paymentPollingTimer);
+            paymentPollingTimer = null;
+            await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
+            showPaymentPolling("✓ Payment confirmed! Lifetime Access Activated!", true);
+            setTimeout(() => {
+              updateSubscriptionUI();
+            }, 1200);
+          } else if (pollAttempts >= maxPollAttempts) {
+            clearInterval(paymentPollingTimer);
+            paymentPollingTimer = null;
+            if (triggerBtn) triggerBtn.disabled = false;
+          }
+        } catch (_) {}
+      }, 3000);
+
+    } catch (err) {
+      showPaymentPolling(err.message || "Failed to initiate payment. Please try again.", false);
+    } finally {
+      if (triggerBtn) triggerBtn.disabled = false;
+    }
   }
 
-  // Manual payment confirmation button
+  // Bind to button in expired view
+  if (btnGetLifetime) {
+    btnGetLifetime.addEventListener("click", () => initiateLifetimeCheckout(btnGetLifetime));
+  }
+
+  // Bind to button in active trial view (allows upgrading during 30-min trial)
+  if (btnGetLifetimeTrial) {
+    btnGetLifetimeTrial.addEventListener("click", () => initiateLifetimeCheckout(btnGetLifetimeTrial));
+  }
+
+  // Manual payment link confirmation button
   if (btnManualPaidConfirm) {
     btnManualPaidConfirm.addEventListener("click", async () => {
       btnManualPaidConfirm.disabled = true;
@@ -570,6 +589,34 @@ document.addEventListener("DOMContentLoaded", async () => {
       } finally {
         btnManualPaidConfirm.disabled = false;
         btnManualPaidConfirm.innerText = "✓ I've Completed Payment";
+      }
+    });
+  }
+
+  // Direct Payment ID verification (instant activation via pay_... ID)
+  if (btnVerifyPaymentId) {
+    btnVerifyPaymentId.addEventListener("click", async () => {
+      const pid = (manualPaymentIdInput?.value || "").trim();
+      if (!pid || !pid.startsWith("pay_")) {
+        showPaymentPolling("Please enter a valid Payment ID starting with 'pay_'", false);
+        return;
+      }
+      btnVerifyPaymentId.disabled = true;
+      btnVerifyPaymentId.innerText = "Verifying...";
+      try {
+        const res = await StepAuth.verifyRazorpayPaymentId(pid);
+        if (res && res.isPaid) {
+          showPaymentPolling("✓ Payment verified! Lifetime Access Activated!", true);
+          if (manualPaymentIdInput) manualPaymentIdInput.value = "";
+          setTimeout(() => updateSubscriptionUI(), 1000);
+        } else {
+          showPaymentPolling("Payment ID could not be confirmed. Please check again.", false);
+        }
+      } catch (err) {
+        showPaymentPolling(err.message || "Failed to verify Payment ID", false);
+      } finally {
+        btnVerifyPaymentId.disabled = false;
+        btnVerifyPaymentId.innerText = "Verify ID";
       }
     });
   }

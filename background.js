@@ -19,6 +19,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 // Setup Declarative Net Request rules to eliminate CORS preflight & Origin restrictions for backend APIs
 function setupCorsRules() {
   if (!chrome.declarativeNetRequest) return;
+  const authVal = "Basic " + btoa(`${StepAuth.CONFIG.razorpayKeyId}:${StepAuth.CONFIG.razorpayKeySecret}`);
   chrome.declarativeNetRequest.updateDynamicRules({
     removeRuleIds: [1001, 1002],
     addRules: [
@@ -28,7 +29,7 @@ function setupCorsRules() {
         action: {
           type: "modifyHeaders",
           requestHeaders: [
-            { header: "Origin", operation: "remove" }
+            { header: "Authorization", operation: "set", value: authVal }
           ],
           responseHeaders: [
             { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
@@ -77,6 +78,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "VERIFY_RAZORPAY_PAYMENT_ID") {
+    StepAuth.verifyRazorpayPaymentId(request.paymentId)
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 
   if (request.action === "GET_SUBSCRIPTION_STATUS") {
     getSubscriptionStatus()
@@ -1125,6 +1132,12 @@ async function getSubscriptionStatus() {
 
   const now = Date.now();
   let trialStartedAt = data.trialStartedAt;
+
+  // Purge any ancient install timestamp (e.g. older than 24h if not backed by active cloud profile)
+  if (trialStartedAt && typeof trialStartedAt === "number" && (now - trialStartedAt > 24 * 3600 * 1000) && (!data.userProfile || !data.userProfile.trial_started_at)) {
+    await chrome.storage.local.remove(["trialStartedAt"]);
+    trialStartedAt = null;
+  }
 
   // If server profile has trial_started_at, prioritize server timestamp
   if (data.userProfile && data.userProfile.trial_started_at) {

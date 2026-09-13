@@ -178,14 +178,19 @@
         <!-- 30-Minute Free Trial & Lifetime Subscription Status Card -->
         <section id="subscription-card" class="settings-card subscription-card">
           <!-- Active Trial View -->
-          <div id="trial-active-view" class="subscription-row">
-            <div class="subscription-info">
+          <div id="trial-active-view" class="subscription-row" style="flex-direction: column; gap: 8px;">
+            <div class="subscription-info" style="width: 100%;">
               <div class="subscription-title-row">
                 <span class="subscription-title">⏱️ Free Trial</span>
                 <span id="trial-time-badge" class="trial-badge">30m Left</span>
               </div>
               <span class="subscription-sub">Full AI solving unlocked for your first 30 minutes.</span>
             </div>
+            <!-- Lifetime access button during active free trial -->
+            <button id="btn-get-lifetime-trial" class="btn-lifetime-upgrade" type="button" style="margin-top: 2px;">
+              <span>⭐ Get Lifetime Access</span>
+              <span class="lifetime-price-tag">₹50</span>
+            </button>
           </div>
 
           <!-- Trial Expired Paywall View -->
@@ -198,20 +203,23 @@
               </div>
             </div>
             
-            <button id="btn-get-lifetime" class="btn-lifetime-upgrade">
+            <button id="btn-get-lifetime" class="btn-lifetime-upgrade" type="button">
               <span>⭐ Get Lifetime Access</span>
               <span class="lifetime-price-tag">₹50</span>
             </button>
+          </div>
 
-            <!-- Live Payment Status Polling Indicator -->
-            <div id="payment-polling-status" class="payment-polling-status" style="display: none;">
-              <div class="polling-row">
-                <span class="polling-spinner">🔄</span>
-                <span id="payment-polling-text">Opening Razorpay checkout in new tab...</span>
-              </div>
-              <button id="btn-manual-paid-confirm" class="btn-manual-paid" type="button">✓ I've Completed Payment</button>
+          <!-- Live Payment Status Polling Indicator (Available in both active trial & expired states) -->
+          <div id="payment-polling-status" class="payment-polling-status" style="display: none; margin-top: 8px;">
+            <div class="polling-row">
+              <span class="polling-spinner">🔄</span>
+              <span id="payment-polling-text">Opening Razorpay checkout in new tab...</span>
             </div>
-            
+            <button id="btn-manual-paid-confirm" class="btn-manual-paid" type="button">✓ I've Completed Payment</button>
+            <div class="payment-id-verify-row" style="margin-top: 6px; display: flex; gap: 6px;">
+              <input type="text" id="manual-payment-id-input" placeholder="Or enter Payment ID (pay_...)" style="flex: 1; font-size: 11px; padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.3); color: #fff;">
+              <button id="btn-verify-payment-id" type="button" class="btn-manual-paid" style="white-space: nowrap; padding: 5px 10px; font-size: 11px;">Verify ID</button>
+            </div>
           </div>
 
           <!-- Lifetime Active View -->
