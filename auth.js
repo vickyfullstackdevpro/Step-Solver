@@ -1,4 +1,4 @@
-// auth.js - Supabase Authentication, Single-Device Lock, Resend Verification & Razorpay Payment Engine
+// auth.js - Supabase Authentication, Single-Device Lock, Google Mail SMTP & Razorpay Payment Engine
 
 const AUTH_CONFIG = {
   supabaseUrl: "https://sspznikobogfczikozlu.supabase.co",
@@ -7,9 +7,7 @@ const AUTH_CONFIG = {
   razorpayKeyId: "rzp_test_Tb2ApErq4IqHZC",
   razorpayKeySecret: "f6Ram7nmvLYIESUXy3Ei5WsK",
   razorpayHostedLink: "https://rzp.io/rzp/Wk3xyuB",
-  resendApiKey: "re_fSmRCpyx_DMUPcn4oyk99tWPQsvoqje5V",
-  resendSender: "support@vickydevsolutions.com",
-  resendFallbackSender: "onboarding@resend.dev",
+  senderEmail: "support.vickydevsolutions@gmail.com",
   paymentAmountInr: 50
 };
 
@@ -78,31 +76,18 @@ async function authSignUp(email, password, fullName = "") {
   const cleanEmail = email.trim().toLowerCase();
   const cleanName = (fullName || "").trim() || cleanEmail.split("@")[0];
 
-  // 1. Generate verification link using Supabase Admin API
-  // This creates the user in auth.users WITHOUT Supabase's built-in mailer,
-  // completely avoiding Supabase's 3-emails/hour rate limit!
-  const linkRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/admin/generate_link`, {
+  // 1. Standard Supabase Sign Up
+  // Supabase automatically dispatches the verification email through your configured Google Gmail SMTP!
+  const data = await supabaseRequest("/auth/v1/signup", {
     method: "POST",
-    headers: {
-      "apikey": AUTH_CONFIG.supabaseSecretKey,
-      "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-      "Content-Type": "application/json"
-    },
     body: JSON.stringify({
-      type: "signup",
       email: cleanEmail,
       password: password,
       data: { full_name: cleanName }
     })
   });
 
-  const linkData = await linkRes.json().catch(() => ({}));
-  if (!linkRes.ok) {
-    const msg = linkData.message || linkData.msg || "Failed to create account.";
-    throw new Error(msg);
-  }
-
-  const userId = linkData.id;
+  const userId = data.id || data.user?.id;
 
   // 2. Ensure profile row exists in public.profiles table
   if (userId) {
@@ -128,19 +113,7 @@ async function authSignUp(email, password, fullName = "") {
     }
   }
 
-  // 3. Dispatch Email Confirmation via Resend API
-  const resendResult = await sendResendVerificationEmail(
-    cleanEmail,
-    cleanName,
-    linkData.action_link || "",
-    linkData.email_otp || ""
-  );
-
-  return {
-    user: linkData,
-    userId: userId,
-    resend: resendResult
-  };
+  return data;
 }
 
 async function authSignIn(email, password) {
@@ -502,171 +475,22 @@ async function claimThisDevice() {
 }
 
 // -------------------------------------------------------------
-// 6. Resend Email Verification Delivery & Direct Admin Triggers
+// 6. Gmail SMTP Email Verification Resend Trigger
 // -------------------------------------------------------------
-async function sendResendVerificationEmail(recipientEmail, userName = "Student", actionLink = "", emailOtp = "") {
-  if (!AUTH_CONFIG.resendApiKey || !recipientEmail) return { success: false };
-
-  // If in popup or content script, delegate to background service worker to bypass CORS
-  if (typeof window !== "undefined" && chrome.runtime?.sendMessage) {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage({
-        action: "SEND_RESEND_VERIFICATION",
-        recipientEmail,
-        userName,
-        actionLink,
-        emailOtp
-      }, (res) => resolve(res || { success: false }));
-    });
-  }
-
-  const emailHtml = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: auto; padding: 28px 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-      <div style="text-align: center; margin-bottom: 24px;">
-        <h1 style="color: #6366f1; margin: 0; font-size: 24px; font-weight: 700;">Step Solver AI</h1>
-        <p style="color: #64748b; font-size: 13px; margin-top: 4px;">Live AI Assessment Assistant</p>
-      </div>
-      <p style="color: #1e293b; font-size: 15px; font-weight: 600;">Hi ${userName},</p>
-      <p style="color: #475569; font-size: 14px; line-height: 1.6;">
-        Welcome to Step Solver! Please confirm your email address to activate your account and start your <strong>30-minute free trial</strong> with full AI solving capabilities.
-      </p>
-      ${actionLink ? `
-      <div style="text-align: center; margin: 26px 0;">
-        <a href="${actionLink}" target="_blank" style="background: linear-gradient(135deg, #6366f1, #4f46e5); color: #ffffff; text-decoration: none; padding: 13px 30px; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
-          ✓ Confirm My Email
-        </a>
-      </div>
-      ` : ''}
-      ${emailOtp ? `
-      <div style="background: #f1f5f9; border-radius: 8px; padding: 12px; text-align: center; margin: 16px 0;">
-        <span style="font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Verification Code</span>
-        <div style="font-size: 22px; font-weight: 700; color: #1e293b; letter-spacing: 4px; margin-top: 4px;">${emailOtp}</div>
-      </div>
-      ` : ''}
-      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin: 18px 0;">
-        <p style="margin: 0; color: #475569; font-size: 13px; line-height: 1.5;">
-          ⚡ <strong>Your 30-minute trial includes:</strong><br>
-          • Live question detection (MCQs, Cloze, Rearrange, Writing & Speaking)<br>
-          • Google Gemini Flash AI reasoning with key failover<br>
-          • Single-device secure concurrency lock
-        </p>
-      </div>
-      <p style="color: #94a3b8; font-size: 12px; margin-top: 20px; text-align: center;">
-        If you didn't create a Step Solver account, you can safely ignore this email.
-      </p>
-    </div>
-  `;
-
-  let lastError = "";
-
-  try {
-    // 1. Try sending from custom sender
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${AUTH_CONFIG.resendApiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        from: `Step Solver <${AUTH_CONFIG.resendSender}>`,
-        to: [recipientEmail],
-        subject: "Verify Your Email - Step Solver",
-        html: emailHtml
-      })
-    });
-
-    const resData = await res.json().catch(() => ({}));
-    if (res.ok) {
-      return { success: true, id: resData.id };
-    }
-
-    lastError = resData.message || `Resend error ${res.status}`;
-
-    // 2. Try default fallback sender onboarding@resend.dev
-    const fallbackRes = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${AUTH_CONFIG.resendApiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        from: `Step Solver <${AUTH_CONFIG.resendFallbackSender}>`,
-        to: [recipientEmail],
-        subject: "Verify Your Email - Step Solver",
-        html: emailHtml
-      })
-    });
-
-    const fbData = await fallbackRes.json().catch(() => ({}));
-    if (fallbackRes.ok) {
-      return { success: true, id: fbData.id };
-    }
-
-    lastError = fbData.message || lastError;
-  } catch (err) {
-    lastError = err.message;
-  }
-
-  return { success: false, error: lastError };
-}
-
-// Resend confirmation link via Admin API + Resend (Zero Supabase email rate limit)
 async function requestEmailConfirmationResend(email) {
   if (!email) throw new Error("Email is required.");
   const cleanEmail = email.trim().toLowerCase();
 
-  const linkRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/admin/generate_link`, {
+  // Supabase automatically sends the verification link through your Google Gmail SMTP!
+  const data = await supabaseRequest("/auth/v1/resend", {
     method: "POST",
-    headers: {
-      "apikey": AUTH_CONFIG.supabaseSecretKey,
-      "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-      "Content-Type": "application/json"
-    },
     body: JSON.stringify({
       type: "signup",
       email: cleanEmail
     })
   });
 
-  const linkData = await linkRes.json().catch(() => ({}));
-  const actionLink = linkData.action_link || "";
-  const emailOtp = linkData.email_otp || "";
-
-  return sendResendVerificationEmail(cleanEmail, "Student", actionLink, emailOtp);
-}
-
-// Instant test mode confirmation (Bypasses email delivery when testing before domain DNS verification)
-async function confirmUserInstantly(email) {
-  if (!email) throw new Error("Email is required.");
-  const cleanEmail = email.trim().toLowerCase();
-
-  const usersRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/admin/users`, {
-    headers: {
-      "apikey": AUTH_CONFIG.supabaseSecretKey,
-      "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`
-    }
-  });
-
-  const data = await usersRes.json();
-  const user = (data.users || []).find(u => u.email === cleanEmail);
-  if (!user) throw new Error("User account not found.");
-
-  const patchRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/admin/users/${user.id}`, {
-    method: "PUT",
-    headers: {
-      "apikey": AUTH_CONFIG.supabaseSecretKey,
-      "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ email_confirm: true })
-  });
-
-  if (!patchRes.ok) {
-    const err = await patchRes.json().catch(() => ({}));
-    throw new Error(err.message || "Failed to confirm account.");
-  }
-
-  return { success: true, userId: user.id };
+  return { success: true, data };
 }
 
 // -------------------------------------------------------------
@@ -886,9 +710,7 @@ const stepAuthExport = {
   registerDeviceOnServer,
   verifyDeviceConcurrency,
   claimThisDevice,
-  sendResendVerificationEmail,
   requestEmailConfirmationResend,
-  confirmUserInstantly,
   createRazorpayPaymentLink,
   verifyRazorpayPaymentLink
 };

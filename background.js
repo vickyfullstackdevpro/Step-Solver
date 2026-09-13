@@ -39,24 +39,6 @@ function setupCorsRules() {
         condition: {
           urlFilter: "||api.razorpay.com/*"
         }
-      },
-      {
-        id: 1002,
-        priority: 1,
-        action: {
-          type: "modifyHeaders",
-          requestHeaders: [
-            { header: "Origin", operation: "remove" }
-          ],
-          responseHeaders: [
-            { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
-            { header: "Access-Control-Allow-Methods", operation: "set", value: "GET, POST, OPTIONS, PUT, DELETE, PATCH" },
-            { header: "Access-Control-Allow-Headers", operation: "set", value: "*" }
-          ]
-        },
-        condition: {
-          urlFilter: "||api.resend.com/*"
-        }
       }
     ]
   }).catch((err) => console.warn("[DNR] Rule setup notice:", err.message));
@@ -93,12 +75,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === "SEND_RESEND_VERIFICATION") {
-    StepAuth.sendResendVerificationEmail(request.recipientEmail, request.userName, request.actionLink, request.emailOtp)
-      .then((data) => sendResponse({ success: true, data }))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
 
   if (request.action === "GET_SUBSCRIPTION_STATUS") {
     getSubscriptionStatus()

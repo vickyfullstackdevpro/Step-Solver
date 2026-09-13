@@ -67,8 +67,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   const btnGetLifetime = document.getElementById("btn-get-lifetime");
   const paymentPollingStatus = document.getElementById("payment-polling-status");
   const paymentPollingText = document.getElementById("payment-polling-text");
-  const btnInstantVerify = document.getElementById("btn-instant-verify");
-
   let authMode = "signin"; // "signin" | "signup"
   let paymentPollingTimer = null;
   let countdownInterval = null;
@@ -242,7 +240,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           if (err.code === "EMAIL_NOT_CONFIRMED") {
             if (verifyEmailDisplay) verifyEmailDisplay.innerText = email;
             switchView("verify");
-            showVerifyFeedback("Please verify your email to continue. A link was sent via Resend.", "info");
+            showVerifyFeedback("Please verify your email address. We sent a link from support.vickydevsolutions@gmail.com.", "info");
           } else {
             showAuthFeedback(err.message || "Failed to sign in. Please check credentials.", "error");
           }
@@ -251,12 +249,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
       } else {
         try {
-          showAuthFeedback("Creating account & sending Resend verification email...", "info");
+          showAuthFeedback("Creating account & sending confirmation email...", "info");
           await StepAuth.authSignUp(email, password, fullName);
           
           if (verifyEmailDisplay) verifyEmailDisplay.innerText = email;
           switchView("verify");
-          showVerifyFeedback("✓ Confirmation email dispatched via Resend! Please click the link in your email.", "success");
+          showVerifyFeedback("✓ Confirmation email sent! Please check your inbox (or spam) and click the link.", "success");
         } catch (err) {
           showAuthFeedback(err.message || "Sign up failed. Please try again.", "error");
         } finally {
@@ -321,33 +319,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  if (btnInstantVerify) {
-    btnInstantVerify.addEventListener("click", async () => {
-      const email = verifyEmailDisplay?.innerText || authEmailInput?.value;
-      if (!email) {
-        showVerifyFeedback("Please enter your email to activate.", "error");
-        return;
-      }
-      btnInstantVerify.disabled = true;
-      btnInstantVerify.innerText = "Activating...";
-      try {
-        await StepAuth.confirmUserInstantly(email);
-        showVerifyFeedback("✓ Account activated! Please sign in now.", "success");
-        setTimeout(() => {
-          setAuthMode("signin");
-          switchView("auth");
-          if (authEmailInput) authEmailInput.value = email;
-          if (authPasswordInput) authPasswordInput.focus();
-        }, 1200);
-      } catch (err) {
-        showVerifyFeedback(err.message || "Failed to activate.", "error");
-      } finally {
-        btnInstantVerify.disabled = false;
-        btnInstantVerify.innerText = "⚡ Auto-Activate Email (Test Mode)";
-      }
-    });
-  }
-
   if (btnResendVerification) {
     btnResendVerification.addEventListener("click", async () => {
       const email = verifyEmailDisplay?.innerText || authEmailInput?.value;
@@ -356,15 +327,20 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
       btnResendVerification.disabled = true;
-      btnResendVerification.innerText = "Sending via Resend...";
+      btnResendVerification.innerText = "Sending...";
       try {
         await StepAuth.requestEmailConfirmationResend(email);
-        showVerifyFeedback("✓ Confirmation email sent via Resend! Please check your spam/inbox.", "success");
+        showVerifyFeedback("✓ Confirmation email resent! Please check your inbox or spam.", "success");
       } catch (err) {
-        showVerifyFeedback(err.message || "Failed to resend email.", "error");
+        const msg = (err.message && err.message.includes("only request this after"))
+          ? "Please wait a few seconds before requesting another email."
+          : (err.message || "Failed to resend email.");
+        showVerifyFeedback(msg, "error");
       } finally {
-        btnResendVerification.disabled = false;
-        btnResendVerification.innerText = "📨 Resend Verification Link";
+        setTimeout(() => {
+          btnResendVerification.disabled = false;
+          btnResendVerification.innerText = "📨 Resend Verification Link";
+        }, 2000);
       }
     });
   }
