@@ -1,4 +1,4 @@
-// popup.js - Multi-API Key Pool, Supabase Auth, Single-Device Lock & Razorpay Lifetime Engine
+// popup.js - Multi-API Key Pool, Supabase Auth, Single-Device Lock & UPI Lifetime Engine
 
 document.addEventListener("DOMContentLoaded", async () => {
   const MAX_KEYS = 10;
@@ -59,19 +59,26 @@ document.addEventListener("DOMContentLoaded", async () => {
   const refreshIcon = document.getElementById("refresh-icon");
   const refreshBtnText = document.getElementById("refresh-btn-text");
 
-  // Elements - Subscription / Trial / Razorpay
+  // Elements - Subscription / Trial / UPI QR & Manual Verification
   const trialActiveView = document.getElementById("trial-active-view");
   const trialTimeBadge = document.getElementById("trial-time-badge");
   const trialExpiredView = document.getElementById("trial-expired-view");
+  const qrPaymentSection = document.getElementById("qr-payment-section");
   const lifetimeActiveView = document.getElementById("lifetime-active-view");
-  const btnGetLifetime = document.getElementById("btn-get-lifetime");
   const btnGetLifetimeTrial = document.getElementById("btn-get-lifetime-trial");
-  const manualPaymentIdInput = document.getElementById("manual-payment-id-input");
-  const btnVerifyPaymentId = document.getElementById("btn-verify-payment-id");
-  const paymentPollingStatus = document.getElementById("payment-polling-status");
-  const paymentPollingText = document.getElementById("payment-polling-text");
+  const btnCopyUpi = document.getElementById("btn-copy-upi");
+  const upiIdText = document.getElementById("upi-id-text");
+  const qrDetailEmail = document.getElementById("qr-detail-email");
+  const qrDetailDevice = document.getElementById("qr-detail-device");
+  const btnCopyEmail = document.getElementById("btn-copy-email");
+  const btnCopyDevice = document.getElementById("btn-copy-device");
+  const btnSendEmailLink = document.getElementById("btn-send-email-link");
+  const linkSupportEmail = document.getElementById("link-support-email");
+  const btnCheckManualStatus = document.getElementById("btn-check-manual-status");
+  const checkStatusIcon = document.getElementById("check-status-icon");
+  const checkStatusText = document.getElementById("check-status-text");
+  const manualStatusFeedback = document.getElementById("manual-status-feedback");
   let authMode = "signin"; // "signin" | "signup"
-  let paymentPollingTimer = null;
   let countdownInterval = null;
 
   // -------------------------------------------------------------
@@ -148,26 +155,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       // 1. Sync authoritative cloud user profile from Supabase (payment_status, trial_started_at)
       await StepAuth.syncUserProfile(session);
 
-      // 2. Check and verify pending payment link ONLY if user initiated payment verification
-      const storedPay = await chrome.storage.local.get(["activePaymentLinkId", "isLifetimeActive", "pendingPaymentVerification"]);
-      
-      // Auto-purge any obsolete/stale test payment link
-      if (storedPay.activePaymentLinkId && storedPay.activePaymentLinkId.includes("Tb2fkbf9vmJ4ka")) {
-        await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
-        storedPay.activePaymentLinkId = null;
-        storedPay.pendingPaymentVerification = false;
-      }
-
-      if (!storedPay.isLifetimeActive && storedPay.activePaymentLinkId && storedPay.pendingPaymentVerification) {
-        try {
-          const res = await StepAuth.verifyRazorpayPaymentLink(storedPay.activePaymentLinkId);
-          if (res && res.isPaid) {
-            await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
-          }
-        } catch (_) {}
-      }
-
-      // 3. Check and update subscription & trial status
+      // 2. Check and update subscription & trial status
       await updateSubscriptionUI();
 
     } catch (err) {
@@ -418,7 +406,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // -------------------------------------------------------------
-  // 6. Subscription, 30-Min Trial & Razorpay ₹50 Payment Engine
+  // 6. Subscription, 30-Min Trial & UPI QR Payment Engine
   // -------------------------------------------------------------
   async function updateSubscriptionUI() {
     try {
@@ -430,19 +418,23 @@ document.addEventListener("DOMContentLoaded", async () => {
         countdownInterval = null;
       }
 
+      // Populate user details for QR verification instructions
+      populateQrUserDetails();
+
       // Case 1: Lifetime Access Unlocked
       if (response.isLifetime) {
         if (trialActiveView) trialActiveView.style.display = "none";
         if (trialExpiredView) trialExpiredView.style.display = "none";
+        if (qrPaymentSection) qrPaymentSection.style.display = "none";
         if (lifetimeActiveView) lifetimeActiveView.style.display = "flex";
-        if (paymentPollingStatus) paymentPollingStatus.style.display = "none";
         return;
       }
 
-      // Case 2: Trial Expired -> Show ₹50 Paywall
+      // Case 2: Trial Expired -> Show Trial Expired Banner & UPI QR Code Section
       if (response.isTrialExpired) {
         if (trialActiveView) trialActiveView.style.display = "none";
         if (trialExpiredView) trialExpiredView.style.display = "flex";
+        if (qrPaymentSection) qrPaymentSection.style.display = "flex";
         if (lifetimeActiveView) lifetimeActiveView.style.display = "none";
         return;
       }
@@ -458,6 +450,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (remainingMs <= 0) {
           if (trialActiveView) trialActiveView.style.display = "none";
           if (trialExpiredView) trialExpiredView.style.display = "flex";
+          if (qrPaymentSection) qrPaymentSection.style.display = "flex";
           if (countdownInterval) clearInterval(countdownInterval);
           return;
         }
@@ -487,164 +480,171 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Razorpay Hosted Payment Flow
-  const btnManualPaidConfirm = document.getElementById("btn-manual-paid-confirm");
-
-  async function initiateLifetimeCheckout(triggerBtn) {
-    if (triggerBtn) triggerBtn.disabled = true;
-    showPaymentPolling("Creating secure Razorpay checkout link...");
-
+  // Open Gmail web compose tab with prefilled recipient, subject, and details
+  async function openGmailComposeTab() {
     try {
       const session = await StepAuth.getStoredSession();
-      const userEmail = session?.user?.email || "customer@step-solver.com";
-      const userName = session?.user?.user_metadata?.full_name || "Step Solver User";
+      const userEmail = session?.user?.email || "customer@example.com";
+      const deviceId = await StepAuth.getOrCreateDeviceId();
 
-      const paymentData = await StepAuth.createRazorpayPaymentLink(userEmail, userName);
-      if (!paymentData || !paymentData.paymentUrl) {
-        throw new Error("Unable to generate payment link. Please check your network connection.");
+      const to = "support.vickydevsolutions@gmail.com";
+      const subject = "Step Solver Lifetime Payment Verification";
+      const body = `Hi Vicky,\n\nI have completed the ₹50 UPI payment for Step Solver Lifetime Access.\n\nMy Details:\n- Registered Email: ${userEmail}\n- Device ID: ${deviceId}\n\nPlease find attached my payment screenshot showing the Transaction / UTR ID.\n\nThank you!`;
+
+      const gmailComposeUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+      if (chrome.tabs && chrome.tabs.create) {
+        chrome.tabs.create({ url: gmailComposeUrl });
+      } else {
+        window.open(gmailComposeUrl, "_blank");
       }
-
-      const paymentUrl = paymentData.paymentUrl;
-      const paymentLinkId = paymentData.paymentLinkId;
-
-      await chrome.storage.local.set({
-        pendingPaymentVerification: true,
-        activePaymentLinkId: paymentLinkId
-      });
-
-      // Open fresh Razorpay hosted payment link in a new browser tab immediately
-      chrome.tabs.create({ url: paymentUrl });
-
-      showPaymentPolling("Payment tab opened! Complete ₹50 on Razorpay, then click below:");
-
-      // Start polling Razorpay payment status
-      if (paymentPollingTimer) clearInterval(paymentPollingTimer);
-      let pollAttempts = 0;
-      const maxPollAttempts = 100; // Poll for up to 5 minutes
-
-      paymentPollingTimer = setInterval(async () => {
-        pollAttempts++;
-        try {
-          const check = await StepAuth.verifyRazorpayPaymentLink(paymentLinkId);
-          if (check.isPaid) {
-            clearInterval(paymentPollingTimer);
-            paymentPollingTimer = null;
-            await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
-            showPaymentPolling("✓ Payment confirmed! Lifetime Access Activated!", true);
-            setTimeout(() => {
-              updateSubscriptionUI();
-            }, 1200);
-          } else if (pollAttempts >= maxPollAttempts) {
-            clearInterval(paymentPollingTimer);
-            paymentPollingTimer = null;
-            if (triggerBtn) triggerBtn.disabled = false;
-          }
-        } catch (_) {}
-      }, 3000);
-
     } catch (err) {
-      showPaymentPolling(err.message || "Failed to initiate payment. Please try again.", false);
-    } finally {
-      if (triggerBtn) triggerBtn.disabled = false;
+      console.warn("[Gmail] Open notice:", err);
     }
   }
 
-  // Bind to button in expired view
-  if (btnGetLifetime) {
-    btnGetLifetime.addEventListener("click", () => initiateLifetimeCheckout(btnGetLifetime));
+  // Populate registered details for payment screenshot email
+  async function populateQrUserDetails() {
+    try {
+      const session = await StepAuth.getStoredSession();
+      const userEmail = session?.user?.email || "customer@example.com";
+      const deviceId = await StepAuth.getOrCreateDeviceId();
+
+      if (qrDetailEmail) qrDetailEmail.innerText = userEmail;
+      if (qrDetailDevice) qrDetailDevice.innerText = deviceId;
+    } catch (_) {}
   }
 
-  // Bind to button in active trial view (allows upgrading during 30-min trial)
+  // Bind Open in Gmail button
+  if (btnSendEmailLink) {
+    btnSendEmailLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      openGmailComposeTab();
+    });
+  }
+
+  // Bind support email link in Step 3
+  if (linkSupportEmail) {
+    linkSupportEmail.addEventListener("click", (e) => {
+      e.preventDefault();
+      openGmailComposeTab();
+    });
+  }
+
+  // Toggle QR payment card during active free trial
   if (btnGetLifetimeTrial) {
-    btnGetLifetimeTrial.addEventListener("click", () => initiateLifetimeCheckout(btnGetLifetimeTrial));
-  }
-
-  // Manual payment link confirmation button
-  if (btnManualPaidConfirm) {
-    btnManualPaidConfirm.addEventListener("click", async () => {
-      btnManualPaidConfirm.disabled = true;
-      btnManualPaidConfirm.innerText = "Checking...";
-
-      try {
-        const stored = await chrome.storage.local.get(["activePaymentLinkId"]);
-        const linkId = stored.activePaymentLinkId;
-        if (!linkId) {
-          showPaymentPolling("No active payment link found. Please click 'Get Lifetime Access' first.", false);
-          return;
-        }
-
-        const check = await StepAuth.verifyRazorpayPaymentLink(linkId);
-
-        if (check.isPaid) {
-          await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
-          showPaymentPolling("✓ Payment verified! Lifetime Access Activated!", true);
-          setTimeout(() => {
-            updateSubscriptionUI();
-          }, 1000);
-        } else {
-          showPaymentPolling("Payment pending or confirming with Razorpay. Please complete ₹50 and check again.", false);
-        }
-      } catch (err) {
-        showPaymentPolling("Unable to check status. Please ensure ₹50 payment completed on Razorpay.", false);
-      } finally {
-        btnManualPaidConfirm.disabled = false;
-        btnManualPaidConfirm.innerText = "✓ I've Completed Payment";
+    btnGetLifetimeTrial.addEventListener("click", () => {
+      if (!qrPaymentSection) return;
+      const isVisible = qrPaymentSection.style.display === "flex";
+      qrPaymentSection.style.display = isVisible ? "none" : "flex";
+      btnGetLifetimeTrial.innerText = isVisible ? "⭐ Upgrade to Lifetime Access (₹50)" : "▲ Hide Payment QR Code";
+      if (!isVisible) {
+        populateQrUserDetails();
+        qrPaymentSection.scrollIntoView({ behavior: "smooth" });
       }
     });
   }
 
-  // Direct Payment ID verification (instant activation via pay_... ID)
-  if (btnVerifyPaymentId) {
-    btnVerifyPaymentId.addEventListener("click", async () => {
-      const pid = (manualPaymentIdInput?.value || "").trim();
-      if (!pid || !pid.startsWith("pay_")) {
-        showPaymentPolling("Please enter a valid Payment ID starting with 'pay_'", false);
-        return;
-      }
-      btnVerifyPaymentId.disabled = true;
-      btnVerifyPaymentId.innerText = "Verifying...";
-      try {
-        const res = await StepAuth.verifyRazorpayPaymentId(pid);
-        if (res && res.isPaid) {
-          showPaymentPolling("✓ Payment verified! Lifetime Access Activated!", true);
-          if (manualPaymentIdInput) manualPaymentIdInput.value = "";
-          setTimeout(() => updateSubscriptionUI(), 1000);
-        } else {
-          showPaymentPolling("Payment ID could not be confirmed. Please check again.", false);
-        }
-      } catch (err) {
-        showPaymentPolling(err.message || "Failed to verify Payment ID", false);
-      } finally {
-        btnVerifyPaymentId.disabled = false;
-        btnVerifyPaymentId.innerText = "Verify ID";
-      }
+  // Copy UPI ID button
+  if (btnCopyUpi) {
+    btnCopyUpi.addEventListener("click", () => {
+      const upi = upiIdText ? upiIdText.innerText.trim() : "vicky636501@oksbi";
+      navigator.clipboard.writeText(upi).then(() => {
+        const originalText = btnCopyUpi.innerText;
+        btnCopyUpi.innerText = "✓ Copied!";
+        setTimeout(() => { btnCopyUpi.innerText = originalText; }, 1800);
+      }).catch(() => {});
     });
   }
 
-  function showPaymentPolling(text, isSuccess = false) {
-    if (!paymentPollingStatus || !paymentPollingText) return;
-    paymentPollingText.innerText = text;
-    paymentPollingStatus.style.display = "flex";
-    if (isSuccess) {
-      paymentPollingStatus.style.background = "rgba(16, 185, 129, 0.2)";
-      paymentPollingStatus.style.borderColor = "rgba(16, 185, 129, 0.6)";
-    }
+  // Copy Registered Email button
+  if (btnCopyEmail) {
+    btnCopyEmail.addEventListener("click", () => {
+      const email = qrDetailEmail ? qrDetailEmail.innerText.trim() : "";
+      if (!email) return;
+      navigator.clipboard.writeText(email).then(() => {
+        btnCopyEmail.innerText = "✓";
+        setTimeout(() => { btnCopyEmail.innerText = "📋"; }, 1800);
+      }).catch(() => {});
+    });
   }
 
-  function hidePaymentPolling() {
-    if (paymentPollingStatus) paymentPollingStatus.style.display = "none";
+  // Copy Device ID button
+  if (btnCopyDevice) {
+    btnCopyDevice.addEventListener("click", () => {
+      const dev = qrDetailDevice ? qrDetailDevice.innerText.trim() : "";
+      if (!dev) return;
+      navigator.clipboard.writeText(dev).then(() => {
+        btnCopyDevice.innerText = "✓";
+        setTimeout(() => { btnCopyDevice.innerText = "📋"; }, 1800);
+      }).catch(() => {});
+    });
+  }
+
+  // Check Activation Status button
+  if (btnCheckManualStatus) {
+    btnCheckManualStatus.addEventListener("click", async () => {
+      btnCheckManualStatus.disabled = true;
+      if (checkStatusIcon) checkStatusIcon.style.animation = "spin 1s linear infinite";
+      if (checkStatusText) checkStatusText.innerText = "Checking Database...";
+      if (manualStatusFeedback) {
+        manualStatusFeedback.style.display = "none";
+        manualStatusFeedback.className = "manual-status-feedback";
+      }
+
+      try {
+        const statusRes = await StepAuth.checkManualPaymentStatus();
+        if (statusRes && statusRes.isPaid) {
+          if (manualStatusFeedback) {
+            manualStatusFeedback.className = "manual-status-feedback success";
+            manualStatusFeedback.innerText = "✓ Lifetime Access Verified & Activated!";
+            manualStatusFeedback.style.display = "block";
+          }
+          await chrome.storage.local.set({ isLifetimeActive: true });
+          setTimeout(async () => {
+            await updateSubscriptionUI();
+          }, 1200);
+        } else {
+          if (manualStatusFeedback) {
+            manualStatusFeedback.className = "manual-status-feedback pending";
+            manualStatusFeedback.innerText = "⏳ Status: Unpaid / Pending Verification. If you have sent your screenshot to support.vickydevsolutions@gmail.com, please allow a few moments for approval.";
+            manualStatusFeedback.style.display = "block";
+          }
+        }
+      } catch (err) {
+        if (manualStatusFeedback) {
+          manualStatusFeedback.className = "manual-status-feedback pending";
+          manualStatusFeedback.innerText = "Unable to reach verification server. Please check your internet connection.";
+          manualStatusFeedback.style.display = "block";
+        }
+      } finally {
+        btnCheckManualStatus.disabled = false;
+        if (checkStatusIcon) checkStatusIcon.style.animation = "none";
+        if (checkStatusText) checkStatusText.innerText = "Check Activation Status";
+      }
+    });
   }
 
   // -------------------------------------------------------------
   // 7. General Settings: Master Power, Pacing, Developer Link
   // -------------------------------------------------------------
+  const toggleAnswerPopup = document.getElementById("toggle-answer-popup");
+  const answerPopupBadge = document.getElementById("answer-popup-badge");
+  const toggleAutoSubmit = document.getElementById("toggle-auto-submit");
+  const autoSubmitBadge = document.getElementById("auto-submit-badge");
+  const modalAutoSubmitWarning = document.getElementById("modal-auto-submit-warning");
+  const btnCancelAutoSubmit = document.getElementById("btn-cancel-auto-submit");
+  const btnConfirmAutoSubmit = document.getElementById("btn-confirm-auto-submit");
+
   const stored = await chrome.storage.local.get([
     "geminiApiKeys",
     "activeKeyIndex",
     "geminiApiKey",
     "geminiModel",
     "typingDelayMs",
-    "extensionEnabled"
+    "extensionEnabled",
+    "answerPopupEnabled",
+    "autoSubmitEnabled"
   ]);
 
   const isEnabled = stored.extensionEnabled !== false;
@@ -676,6 +676,105 @@ document.addEventListener("DOMContentLoaded", async () => {
       masterPowerStatus.innerText = "Paused (Disabled)";
       masterPowerStatus.className = "master-power-status disabled";
     }
+  }
+
+  // Answer Popup Toggle (Default: ON / true)
+  const isAnswerPopup = stored.answerPopupEnabled !== false;
+  if (toggleAnswerPopup) {
+    toggleAnswerPopup.checked = isAnswerPopup;
+    updateAnswerPopupUI(isAnswerPopup);
+
+    toggleAnswerPopup.addEventListener("change", async (e) => {
+      const val = e.target.checked;
+      updateAnswerPopupUI(val);
+      await chrome.storage.local.set({ answerPopupEnabled: val });
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          chrome.tabs.sendMessage(tab.id, {
+            action: "ANSWER_POPUP_TOGGLED",
+            enabled: val
+          }).catch(() => {});
+        });
+      });
+    });
+  }
+
+  function updateAnswerPopupUI(enabled) {
+    if (!answerPopupBadge) return;
+    if (enabled) {
+      answerPopupBadge.innerText = "ON";
+      answerPopupBadge.className = "badge-pill active";
+    } else {
+      answerPopupBadge.innerText = "OFF";
+      answerPopupBadge.className = "badge-pill off";
+    }
+  }
+
+  // Auto-Submit Toggle with Disclaimer Warning Modal (Default: OFF / false)
+  let isAutoSubmit = stored.autoSubmitEnabled === true;
+  if (toggleAutoSubmit) {
+    toggleAutoSubmit.checked = isAutoSubmit;
+    updateAutoSubmitUI(isAutoSubmit);
+
+    toggleAutoSubmit.addEventListener("click", (e) => {
+      const targetChecked = toggleAutoSubmit.checked;
+      if (targetChecked) {
+        // Turning ON: Must show warning confirmation modal
+        e.preventDefault();
+        toggleAutoSubmit.checked = false;
+        if (modalAutoSubmitWarning) {
+          modalAutoSubmitWarning.style.display = "flex";
+        }
+      } else {
+        // Turning OFF: No modal needed
+        isAutoSubmit = false;
+        updateAutoSubmitUI(false);
+        chrome.storage.local.set({ autoSubmitEnabled: false });
+        notifyAutoSubmitToggled(false);
+      }
+    });
+  }
+
+  if (btnCancelAutoSubmit) {
+    btnCancelAutoSubmit.addEventListener("click", () => {
+      if (modalAutoSubmitWarning) modalAutoSubmitWarning.style.display = "none";
+      if (toggleAutoSubmit) toggleAutoSubmit.checked = false;
+      updateAutoSubmitUI(false);
+    });
+  }
+
+  if (btnConfirmAutoSubmit) {
+    btnConfirmAutoSubmit.addEventListener("click", async () => {
+      if (modalAutoSubmitWarning) modalAutoSubmitWarning.style.display = "none";
+      isAutoSubmit = true;
+      if (toggleAutoSubmit) toggleAutoSubmit.checked = true;
+      updateAutoSubmitUI(true);
+      await chrome.storage.local.set({ autoSubmitEnabled: true });
+      notifyAutoSubmitToggled(true);
+      showFeedback("✓ Auto-Submit enabled with safety protections.", "success");
+    });
+  }
+
+  function updateAutoSubmitUI(enabled) {
+    if (!autoSubmitBadge) return;
+    if (enabled) {
+      autoSubmitBadge.innerText = "ON";
+      autoSubmitBadge.className = "badge-pill active";
+    } else {
+      autoSubmitBadge.innerText = "OFF";
+      autoSubmitBadge.className = "badge-pill off";
+    }
+  }
+
+  function notifyAutoSubmitToggled(enabled) {
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach((tab) => {
+        chrome.tabs.sendMessage(tab.id, {
+          action: "AUTO_SUBMIT_TOGGLED",
+          enabled: enabled
+        }).catch(() => {});
+      });
+    });
   }
 
   if (stored.typingDelayMs !== undefined && speedSlider && speedValue) {

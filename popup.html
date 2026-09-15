@@ -186,39 +186,94 @@
               </div>
               <span class="subscription-sub">Full AI solving unlocked for your first 30 minutes.</span>
             </div>
-            <!-- Lifetime access button during active free trial -->
+            <!-- Toggle Lifetime QR Code button during active free trial -->
             <button id="btn-get-lifetime-trial" class="btn-lifetime-upgrade" type="button" style="margin-top: 2px;">
-              <span>⭐ Get Lifetime Access</span>
+              <span>⭐ Upgrade to Lifetime Access</span>
               <span class="lifetime-price-tag">₹50</span>
             </button>
           </div>
 
-          <!-- Trial Expired Paywall View -->
+          <!-- Trial Expired Header View -->
           <div id="trial-expired-view" class="trial-expired-container" style="display: none;">
             <div class="trial-expired-header">
               <span class="trial-expired-icon">⏳</span>
               <div class="trial-expired-text">
                 <strong>30-Minute Free Trial Ended</strong>
-                <p>Upgrade to Lifetime Access to continue solving unlimited questions.</p>
+                <p>Scan the QR code below to upgrade to Lifetime Pro Access (₹50).</p>
               </div>
             </div>
-            
-            <button id="btn-get-lifetime" class="btn-lifetime-upgrade" type="button">
-              <span>⭐ Get Lifetime Access</span>
-              <span class="lifetime-price-tag">₹50</span>
-            </button>
           </div>
 
-          <!-- Live Payment Status Polling Indicator (Available in both active trial & expired states) -->
-          <div id="payment-polling-status" class="payment-polling-status" style="display: none; margin-top: 8px;">
-            <div class="polling-row">
-              <span class="polling-spinner">🔄</span>
-              <span id="payment-polling-text">Opening Razorpay checkout in new tab...</span>
+          <!-- UPI QR Code & Manual Verification Section -->
+          <div id="qr-payment-section" class="qr-payment-container" style="display: none;">
+            <div class="qr-card-header">
+              <span class="qr-header-badge">⭐ Lifetime Pro Access</span>
+              <span class="qr-header-price">₹50.00</span>
             </div>
-            <button id="btn-manual-paid-confirm" class="btn-manual-paid" type="button">✓ I've Completed Payment</button>
-            <div class="payment-id-verify-row" style="margin-top: 6px; display: flex; gap: 6px;">
-              <input type="text" id="manual-payment-id-input" placeholder="Or enter Payment ID (pay_...)" style="flex: 1; font-size: 11px; padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); background: rgba(0,0,0,0.3); color: #fff;">
-              <button id="btn-verify-payment-id" type="button" class="btn-manual-paid" style="white-space: nowrap; padding: 5px 10px; font-size: 11px;">Verify ID</button>
+
+            <!-- QR Image Container -->
+            <div class="qr-code-wrapper">
+              <img id="payment-qr-image" src="icons/payment_qr.jpg" alt="Scan UPI QR Code" class="payment-qr-img">
+              <div class="qr-upi-info">
+                <div class="upi-id-pill">
+                  <span class="upi-label">UPI ID:</span>
+                  <span id="upi-id-text" class="upi-val">vicky636501@oksbi</span>
+                  <button id="btn-copy-upi" class="btn-copy-small" type="button" title="Copy UPI ID">📋 Copy</button>
+                </div>
+                <span class="upi-sub-note">Scan with Google Pay, PhonePe, Paytm, or any UPI app</span>
+              </div>
+            </div>
+
+            <!-- Verification Instructions -->
+            <div class="qr-instructions-card">
+              <div class="instructions-title">📋 How to Activate:</div>
+              <ol class="instructions-list">
+                <li>
+                  <span class="step-num">1</span>
+                  <span>Pay <strong>₹50</strong> using the QR code or UPI ID above.</span>
+                </li>
+                <li>
+                  <span class="step-num">2</span>
+                  <span>Take a screenshot of the successful payment showing the Transaction / UTR ID.</span>
+                </li>
+                <li>
+                  <span class="step-num">3</span>
+                  <span>Email the screenshot to:
+                    <a id="link-support-email" href="#" class="support-email-link">support.vickydevsolutions@gmail.com</a>
+                    with your registered details:
+                  </span>
+                </li>
+              </ol>
+
+              <!-- User Registered Details Box for Easy Copy -->
+              <div class="user-details-copy-box">
+                <div class="detail-row">
+                  <span class="detail-label">Registered Email:</span>
+                  <span id="qr-detail-email" class="detail-val">user@example.com</span>
+                  <button id="btn-copy-email" class="btn-copy-small" type="button" title="Copy Email">📋</button>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Device ID:</span>
+                  <span id="qr-detail-device" class="detail-val">dev_...</span>
+                  <button id="btn-copy-device" class="btn-copy-small" type="button" title="Copy Device ID">📋</button>
+                </div>
+              </div>
+
+              <!-- Open Gmail Compose Button -->
+              <button id="btn-send-email-link" type="button" class="btn-email-action">
+                <span>✉️ Open Gmail & Send Screenshot (New Tab)</span>
+              </button>
+
+              <p class="manual-notice">
+                ℹ️ Once received, our admin will verify the payment and activate your lifetime license in the database.
+              </p>
+
+              <!-- Check Activation Status Button -->
+              <button id="btn-check-manual-status" type="button" class="btn-check-activation">
+                <span id="check-status-icon">🔄</span>
+                <span id="check-status-text">Check Activation Status</span>
+              </button>
+              <div id="manual-status-feedback" class="manual-status-feedback" style="display: none;"></div>
             </div>
           </div>
 
@@ -290,6 +345,43 @@
           </div>
         </section>
 
+        <!-- Automation & Display Settings -->
+        <section class="settings-card">
+          <div class="card-header">
+            <span class="section-title">⚙️ Automation & Display</span>
+          </div>
+
+          <!-- Answer Popup Setting -->
+          <div class="setting-toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-title-row">
+                <span class="toggle-title">🎯 Answer Popup</span>
+                <span id="answer-popup-badge" class="badge-pill active">ON</span>
+              </div>
+              <span class="toggle-desc">Display floating answer showcase HUD on screen</span>
+            </div>
+            <label class="master-switch">
+              <input type="checkbox" id="toggle-answer-popup" checked>
+              <span class="master-slider"></span>
+            </label>
+          </div>
+
+          <!-- Auto-Submit Setting -->
+          <div class="setting-toggle-row" style="margin-top: 6px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.08);">
+            <div class="toggle-info">
+              <div class="toggle-title-row">
+                <span class="toggle-title">⚡ Auto-Submit</span>
+                <span id="auto-submit-badge" class="badge-pill off">OFF</span>
+              </div>
+              <span class="toggle-desc">Auto-submits after options clicked & clicks Next on answer page</span>
+            </div>
+            <label class="master-switch">
+              <input type="checkbox" id="toggle-auto-submit">
+              <span class="master-slider"></span>
+            </label>
+          </div>
+        </section>
+
         <!-- Footer & Developer Attribution -->
         <footer class="footer-actions">
           <div class="keyboard-hints">
@@ -302,6 +394,30 @@
       </div>
 
     </main>
+
+    <!-- Auto-Submit Disclaimer Warning Modal -->
+    <div id="modal-auto-submit-warning" class="modal-overlay" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-icon-wrap warning">
+          <span class="modal-icon">⚠️</span>
+        </div>
+        <h3 class="modal-title">Enable Auto-Submit?</h3>
+        <p class="modal-text">
+          When Auto-Submit is enabled, Step Solver will automatically click the <strong>Submit</strong> button after selecting the AI answers, and automatically click the <strong>Next</strong> button on the answer page.
+        </p>
+        <div class="modal-disclaimer-box">
+          <span class="disclaimer-header">⚠️ Strict Safety & Disclaimer:</span>
+          <ul class="disclaimer-points">
+            <li>Empty answers are <strong>never</strong> submitted.</li>
+            <li>The extension and developers are <strong>not responsible</strong> for any misbehavior, unintended selections, test results, or academic penalties.</li>
+          </ul>
+        </div>
+        <div class="modal-actions">
+          <button id="btn-cancel-auto-submit" type="button" class="btn-modal-secondary">Cancel</button>
+          <button id="btn-confirm-auto-submit" type="button" class="btn-modal-warning">I Understand & Enable</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="auth.js"></script>

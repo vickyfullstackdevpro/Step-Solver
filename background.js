@@ -16,37 +16,6 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
-// Setup Declarative Net Request rules to eliminate CORS preflight & Origin restrictions for backend APIs
-function setupCorsRules() {
-  if (!chrome.declarativeNetRequest) return;
-  const authVal = "Basic " + btoa(`${StepAuth.CONFIG.razorpayKeyId}:${StepAuth.CONFIG.razorpayKeySecret}`);
-  chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: [1001, 1002],
-    addRules: [
-      {
-        id: 1001,
-        priority: 1,
-        action: {
-          type: "modifyHeaders",
-          requestHeaders: [
-            { header: "Authorization", operation: "set", value: authVal }
-          ],
-          responseHeaders: [
-            { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
-            { header: "Access-Control-Allow-Methods", operation: "set", value: "GET, POST, OPTIONS, PUT, DELETE, PATCH" },
-            { header: "Access-Control-Allow-Headers", operation: "set", value: "*" }
-          ]
-        },
-        condition: {
-          urlFilter: "||api.razorpay.com/*"
-        }
-      }
-    ]
-  }).catch((err) => console.warn("[DNR] Rule setup notice:", err.message));
-}
-
-setupCorsRules();
-
 // Listen for messages from popup or content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "SOLVE_QUESTION") {
@@ -62,24 +31,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Keep message channel open for async response
   }
 
-  if (request.action === "CREATE_RAZORPAY_PAYMENT_LINK") {
-    const email = request.userEmail || request.customerEmail;
-    const name = request.userName || request.customerName;
-    StepAuth.createRazorpayPaymentLink(email, name)
-      .then((data) => sendResponse({ success: true, data }))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
-
-  if (request.action === "VERIFY_RAZORPAY_PAYMENT_LINK") {
-    StepAuth.verifyRazorpayPaymentLink(request.paymentLinkId)
-      .then((data) => sendResponse({ success: true, data }))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
-
-  if (request.action === "VERIFY_RAZORPAY_PAYMENT_ID") {
-    StepAuth.verifyRazorpayPaymentId(request.paymentId)
+  if (request.action === "CHECK_MANUAL_PAYMENT_STATUS") {
+    StepAuth.checkManualPaymentStatus()
       .then((data) => sendResponse({ success: true, data }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
@@ -1097,7 +1050,7 @@ async function getSubscriptionStatus() {
   // If user profile from Supabase indicates paid
   if (data.userProfile && data.userProfile.payment_status === "paid") {
     if (!data.isLifetimeActive) {
-      await chrome.storage.local.set({ isLifetimeActive: true, paidViaRazorpay: true });
+      await chrome.storage.local.set({ isLifetimeActive: true });
     }
     return {
       status: "LIFETIME_ACTIVE",
@@ -1112,13 +1065,13 @@ async function getSubscriptionStatus() {
 
   // If user profile from Supabase explicitly indicates NOT paid
   if (data.userProfile && data.userProfile.payment_status !== "paid") {
-    if (data.isLifetimeActive || data.paidViaRazorpay) {
-      await chrome.storage.local.set({ isLifetimeActive: false, paidViaRazorpay: false });
+    if (data.isLifetimeActive) {
+      await chrome.storage.local.set({ isLifetimeActive: false });
       data.isLifetimeActive = false;
     }
   }
 
-  if (data.isLifetimeActive === true && data.paidViaRazorpay === true) {
+  if (data.isLifetimeActive === true) {
     return {
       status: "LIFETIME_ACTIVE",
       isLifetime: true,

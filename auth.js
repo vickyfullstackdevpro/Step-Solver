@@ -1,12 +1,10 @@
-// auth.js - Supabase Authentication, Single-Device Lock, Google Mail SMTP & Razorpay Payment Engine
-
 const AUTH_CONFIG = {
   supabaseUrl: "https://sspznikobogfczikozlu.supabase.co",
   supabaseAnonKey: "sb_publishable_hXGTeGYid688TSuSDF6Mww_A8LIc4hF",
-  supabaseSecretKey: "sb_secret_f9KEFGR8LLme-Oo-I__T0g_Ih9eBqyU",
-  razorpayKeyId: "rzp_test_Tb2ApErq4IqHZC",
-  razorpayKeySecret: "f6Ram7nmvLYIESUXy3Ei5WsK",
-  senderEmail: "support.vickydevsolutions@gmail.com",
+  supabaseSecretKey: "sb_publishable_hXGTeGYid688TSuSDF6Mww_A8LIc4hF",
+  supportEmail: "support.vickydevsolutions@gmail.com",
+  upiId: "vicky636501@oksbi",
+  upiName: "Vicky",
   paymentAmountInr: 50
 };
 
@@ -97,8 +95,8 @@ async function authSignUp(email, password, fullName = "") {
       await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles`, {
         method: "POST",
         headers: {
-          "apikey": AUTH_CONFIG.supabaseSecretKey,
-          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
+          "apikey": AUTH_CONFIG.supabaseAnonKey,
+          "Authorization": `Bearer ${AUTH_CONFIG.supabaseAnonKey}`,
           "Content-Type": "application/json",
           "Prefer": "resolution=merge-duplicates"
         },
@@ -188,27 +186,26 @@ async function authSignOut() {
   const session = await getStoredSession();
   if (session?.user?.id) {
     const deviceId = await getOrCreateDeviceId();
+    const token = session.access_token || AUTH_CONFIG.supabaseAnonKey;
+    const headers = {
+      "apikey": AUTH_CONFIG.supabaseAnonKey,
+      "Authorization": `Bearer ${token}`,
+      "Content-Type": "application/json"
+    };
+
     try {
       // Clear current_device_id in profiles so the lock is cleanly released
       await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}&current_device_id=eq.${deviceId}`, {
         method: "PATCH",
-        headers: {
-          "apikey": AUTH_CONFIG.supabaseSecretKey,
-          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-          "Content-Type": "application/json"
-        },
+        headers,
         body: JSON.stringify({ current_device_id: null })
       });
 
       // Mark this device session as inactive in device_sessions
       await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions?user_id=eq.${session.user.id}&device_id=eq.${deviceId}`, {
         method: "PATCH",
-        headers: {
-          "apikey": AUTH_CONFIG.supabaseSecretKey,
-          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ is_active: false, revoked_at: new Date().toISOString() })
+        headers,
+        body: JSON.stringify({ is_active: false })
       });
     } catch (_) {}
 
@@ -226,9 +223,6 @@ async function authSignOut() {
     "isLoggedIn",
     "userProfile",
     "isLifetimeActive",
-    "paidViaRazorpay",
-    "activePaymentLinkId",
-    "pendingPaymentVerification",
     "trialStartedAt"
   ]);
 
@@ -303,10 +297,11 @@ async function getUserProfile(accessToken, userId) {
   if (!userId) return null;
 
   try {
+    const token = accessToken || AUTH_CONFIG.supabaseAnonKey;
     const profiles = await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${userId}&select=*`, {
       headers: {
-        "apikey": AUTH_CONFIG.supabaseSecretKey,
-        "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`
+        "apikey": AUTH_CONFIG.supabaseAnonKey,
+        "Authorization": `Bearer ${token}`
       }
     }).then(r => r.json());
 
@@ -331,17 +326,21 @@ async function syncUserProfile(session) {
   if (profile.payment_status === "paid") {
     await chrome.storage.local.set({
       isLifetimeActive: true,
-      paidViaRazorpay: true,
       lifetimeActivatedAt: profile.paid_at ? new Date(profile.paid_at).getTime() : Date.now()
     });
   } else {
     // Database profile is unpaid, refunded, or revoked
     await chrome.storage.local.set({
-      isLifetimeActive: false,
-      paidViaRazorpay: false
+      isLifetimeActive: false
     });
-    await chrome.storage.local.remove(["activePaymentLinkId", "pendingPaymentVerification"]);
   }
+
+  const token = session.access_token || AUTH_CONFIG.supabaseAnonKey;
+  const authHeaders = {
+    "apikey": AUTH_CONFIG.supabaseAnonKey,
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json"
+  };
 
   // 2. Sync Trial Start Timestamp (Server authoritative)
   if (profile.trial_started_at) {
@@ -359,11 +358,7 @@ async function syncUserProfile(session) {
 
       fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
         method: "PATCH",
-        headers: {
-          "apikey": AUTH_CONFIG.supabaseSecretKey,
-          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-          "Content-Type": "application/json"
-        },
+        headers: authHeaders,
         body: JSON.stringify({ trial_started_at: nowIso, last_active_at: nowIso })
       }).catch(() => {});
     }
@@ -381,11 +376,7 @@ async function syncUserProfile(session) {
     // Update server profile with trial start date
     fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
       method: "PATCH",
-      headers: {
-        "apikey": AUTH_CONFIG.supabaseSecretKey,
-        "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-        "Content-Type": "application/json"
-      },
+      headers: authHeaders,
       body: JSON.stringify({ trial_started_at: isoDate, last_active_at: isoDate })
     }).catch(() => {});
   }
@@ -400,16 +391,19 @@ async function syncUserProfile(session) {
 async function registerDeviceOnServer(userId, deviceId, deviceName) {
   if (!userId || !deviceId) return null;
   const name = deviceName || getDeviceFriendlyName();
+  const session = await getStoredSession();
+  const token = session?.access_token || AUTH_CONFIG.supabaseAnonKey;
+  const headers = {
+    "apikey": AUTH_CONFIG.supabaseAnonKey,
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json"
+  };
 
   try {
-    // 1. Update profiles table with current_device_id and clean friendly name
+    // 1. Update profiles table with current_device_id and friendly name
     await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
       method: "PATCH",
-      headers: {
-        "apikey": AUTH_CONFIG.supabaseSecretKey,
-        "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-        "Content-Type": "application/json"
-      },
+      headers,
       body: JSON.stringify({
         current_device_id: deviceId,
         last_device_name: name,
@@ -420,58 +414,27 @@ async function registerDeviceOnServer(userId, deviceId, deviceName) {
     // 2. Mark other devices for this user as inactive in device_sessions
     await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions?user_id=eq.${userId}&device_id=neq.${deviceId}`, {
       method: "PATCH",
-      headers: {
-        "apikey": AUTH_CONFIG.supabaseSecretKey,
-        "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-        "Content-Type": "application/json"
-      },
+      headers,
       body: JSON.stringify({
-        is_active: false,
-        revoked_at: new Date().toISOString()
+        is_active: false
       })
     }).catch(() => {});
 
-    // 3. Upsert session for this device without creating duplicate rows
-    const checkRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions?user_id=eq.${userId}&device_id=eq.${deviceId}`, {
+    // 3. Upsert session for this device (atomic merge)
+    await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions`, {
+      method: "POST",
       headers: {
-        "apikey": AUTH_CONFIG.supabaseSecretKey,
-        "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`
-      }
+        ...headers,
+        "Prefer": "resolution=merge-duplicates"
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        device_id: deviceId,
+        device_info: name,
+        is_active: true,
+        last_active_at: new Date().toISOString()
+      })
     });
-
-    const existing = await checkRes.json().catch(() => []);
-    if (Array.isArray(existing) && existing.length > 0) {
-      // Update existing session
-      await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions?user_id=eq.${userId}&device_id=eq.${deviceId}`, {
-        method: "PATCH",
-        headers: {
-          "apikey": AUTH_CONFIG.supabaseSecretKey,
-          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          device_info: name,
-          is_active: true,
-          revoked_at: null
-        })
-      });
-    } else {
-      // Insert initial session for this device
-      await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions`, {
-        method: "POST",
-        headers: {
-          "apikey": AUTH_CONFIG.supabaseSecretKey,
-          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          user_id: userId,
-          device_id: deviceId,
-          device_info: name,
-          is_active: true
-        })
-      });
-    }
 
     return { success: true };
   } catch (err) {
@@ -550,285 +513,26 @@ async function requestEmailConfirmationResend(email) {
 }
 
 // -------------------------------------------------------------
-// 7. Razorpay ₹50 Hosted Payment Link Engine
+// 7. Manual Payment Verification via Database & Support
 // -------------------------------------------------------------
-async function createRazorpayPaymentLink(userEmail, userName = "") {
-  // If in popup/content window, delegate to background service worker
-  if (typeof window !== "undefined" && chrome.runtime?.sendMessage) {
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        action: "CREATE_RAZORPAY_PAYMENT_LINK",
-        userEmail,
-        userName
-      }, (res) => {
-        if (chrome.runtime.lastError) {
-          return reject(new Error(chrome.runtime.lastError.message));
-        }
-        if (res && res.success && res.data && res.data.paymentUrl) {
-          resolve(res.data);
-        } else {
-          reject(new Error(res?.error || "Failed to create payment checkout"));
-        }
-      });
-    });
-  }
-
-  const authHeader = "Basic " + btoa(`${AUTH_CONFIG.razorpayKeyId}:${AUTH_CONFIG.razorpayKeySecret}`);
-  const uniqueRef = "ref_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
-  const cleanEmail = (userEmail || "").trim() || "customer@example.com";
-  const cleanName = (userName || "").trim() || "Student";
-  const deviceId = await getOrCreateDeviceId();
-
-  const response = await fetch("https://api.razorpay.com/v1/payment_links", {
-    method: "POST",
-    headers: {
-      "Authorization": authHeader,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      amount: AUTH_CONFIG.paymentAmountInr * 100, // 5000 paise = ₹50.00 INR
-      currency: "INR",
-      accept_partial: false,
-      reference_id: uniqueRef,
-      description: "Step Solver Lifetime Pro License",
-      customer: {
-        name: cleanName,
-        email: cleanEmail
-      },
-      notify: {
-        sms: false,
-        email: false
-      },
-      reminder_enable: false,
-      notes: {
-        product: "Step Solver Lifetime Pro",
-        email: cleanEmail,
-        deviceId: deviceId
-      }
-    })
-  });
-
-  const data = await response.json();
-  if (!response.ok || !data.short_url) {
-    const errorMsg = data.error?.description || data.error?.message || `Razorpay error (${response.status})`;
-    throw new Error(errorMsg);
-  }
-
-  await chrome.storage.local.set({
-    activePaymentLinkId: data.id,
-    activePaymentLinkUrl: data.short_url,
-    activePaymentCreatedAt: Date.now()
-  });
-
-  return {
-    paymentLinkId: data.id,
-    paymentUrl: data.short_url,
-    status: data.status
-  };
-}
-
-async function verifyRazorpayPaymentLink(paymentLinkId) {
-  if (!paymentLinkId) return { isPaid: false };
-
-  // Never query or verify the old stale paid test link
-  if (paymentLinkId === "plink_Tb2fkbf9vmJ4ka" || paymentLinkId.includes("Tb2fkbf9vmJ4ka")) {
-    if (typeof chrome !== "undefined" && chrome.storage?.local) {
-      await chrome.storage.local.remove(["activePaymentLinkId", "pendingPaymentVerification"]);
-    }
-    return { isPaid: false };
-  }
-
-  // If in popup/content window, delegate to background service worker
-  if (typeof window !== "undefined" && chrome.runtime?.sendMessage) {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage({
-        action: "VERIFY_RAZORPAY_PAYMENT_LINK",
-        paymentLinkId
-      }, (res) => {
-        if (res && res.success && res.data) {
-          resolve(res.data);
-        } else {
-          resolve({ isPaid: false });
-        }
-      });
-    });
-  }
-
-  const authHeader = "Basic " + btoa(`${AUTH_CONFIG.razorpayKeyId}:${AUTH_CONFIG.razorpayKeySecret}`);
-
-  try {
-    // Make standard simple GET request. DNR rule 1001 automatically injects Authorization
-    // and Access-Control-Allow-Origin: * to prevent CORS preflight issues
-    let response;
-    try {
-      response = await fetch(`https://api.razorpay.com/v1/payment_links/${paymentLinkId}`, {
-        method: "GET"
-      });
-    } catch (_) {
-      // Fallback with explicit Authorization header
-      response = await fetch(`https://api.razorpay.com/v1/payment_links/${paymentLinkId}`, {
-        method: "GET",
-        headers: { "Authorization": authHeader }
-      });
-    }
-
-    const data = await response.json();
-    if (response.ok) {
-      const isPaid = data.status === "paid";
-      if (isPaid) {
-        const paymentId = (data.payments && data.payments[0]?.payment_id) || "pay_" + Date.now();
-
-        await chrome.storage.local.set({
-          isLifetimeActive: true,
-          lifetimeActivatedAt: Date.now(),
-          paidViaRazorpay: true,
-          lastPaymentId: paymentId
-        });
-        await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
-
-        const session = await getStoredSession();
-        const userId = session?.user?.id;
-        const deviceId = await getOrCreateDeviceId();
-
-        if (userId) {
-          try {
-            await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
-              method: "PATCH",
-              headers: {
-                "apikey": AUTH_CONFIG.supabaseSecretKey,
-                "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                payment_status: "paid",
-                amount_paid_inr: 50,
-                paid_at: new Date().toISOString()
-              })
-            });
-
-            await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/payments`, {
-              method: "POST",
-              headers: {
-                "apikey": AUTH_CONFIG.supabaseSecretKey,
-                "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                user_id: userId,
-                razorpay_order_id: data.order_id || paymentLinkId,
-                razorpay_payment_id: paymentId,
-                razorpay_signature: "sig_" + paymentId.slice(-8),
-                amount_inr: 50,
-                currency: "INR",
-                status: "captured",
-                device_id: deviceId,
-                verified_at: new Date().toISOString()
-              })
-            });
-          } catch (recErr) {
-            console.warn("[Auth] Recording notice:", recErr.message);
-          }
-        }
-
-        return {
-          isPaid: true,
-          status: data.status,
-          amount: (data.amount || 5000) / 100,
-          paymentId
-        };
-      }
-
-      return {
-        isPaid: false,
-        status: data.status,
-        amount: (data.amount || 5000) / 100
-      };
-    }
-  } catch (err) {
-    console.warn("[Auth] verify notice:", err.message);
-  }
-
-  return { isPaid: false };
-}
-
-// Direct Payment ID verification for instant manual activation
-async function verifyRazorpayPaymentId(paymentId) {
-  if (!paymentId || typeof paymentId !== "string" || !paymentId.trim().startsWith("pay_")) {
-    throw new Error("Please enter a valid Payment ID starting with 'pay_'");
-  }
-
-  const cleanPaymentId = paymentId.trim();
-
-  // If in popup/content window, delegate to background service worker
-  if (typeof window !== "undefined" && chrome.runtime?.sendMessage) {
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        action: "VERIFY_RAZORPAY_PAYMENT_ID",
-        paymentId: cleanPaymentId
-      }, (res) => {
-        if (res && res.success && res.data) {
-          resolve(res.data);
-        } else {
-          reject(new Error(res?.error || "Failed to verify Payment ID"));
-        }
-      });
-    });
-  }
-
-  // Activate lifetime in storage
-  await chrome.storage.local.set({
-    isLifetimeActive: true,
-    lifetimeActivatedAt: Date.now(),
-    paidViaRazorpay: true,
-    lastPaymentId: cleanPaymentId
-  });
-  await chrome.storage.local.remove(["pendingPaymentVerification", "activePaymentLinkId"]);
-
+async function checkManualPaymentStatus() {
   const session = await getStoredSession();
-  const userId = session?.user?.id;
-  const deviceId = await getOrCreateDeviceId();
-
-  if (userId) {
-    try {
-      await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
-        method: "PATCH",
-        headers: {
-          "apikey": AUTH_CONFIG.supabaseSecretKey,
-          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          payment_status: "paid",
-          amount_paid_inr: 50,
-          paid_at: new Date().toISOString()
-        })
-      });
-
-      await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/payments`, {
-        method: "POST",
-        headers: {
-          "apikey": AUTH_CONFIG.supabaseSecretKey,
-          "Authorization": `Bearer ${AUTH_CONFIG.supabaseSecretKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          user_id: userId,
-          razorpay_order_id: cleanPaymentId,
-          razorpay_payment_id: cleanPaymentId,
-          razorpay_signature: "sig_" + cleanPaymentId.slice(-8),
-          amount_inr: 50,
-          currency: "INR",
-          status: "captured",
-          device_id: deviceId,
-          verified_at: new Date().toISOString()
-        })
-      });
-    } catch (recErr) {
-      console.warn("[Auth] Recording notice:", recErr.message);
-    }
+  if (!session?.user?.id) {
+    return { isPaid: false, message: "Please sign in to check payment status." };
   }
 
-  return { isPaid: true, status: "captured", amount: 50, paymentId: cleanPaymentId };
+  const profile = await syncUserProfile(session);
+  if (!profile) {
+    return { isPaid: false, message: "Unable to reach database. Please check your connection." };
+  }
+
+  const isPaid = profile.payment_status === "paid";
+  return {
+    isPaid,
+    paymentStatus: profile.payment_status || "unpaid",
+    paidAt: profile.paid_at || null,
+    profile
+  };
 }
 
 // -------------------------------------------------------------
@@ -850,9 +554,7 @@ const stepAuthExport = {
   verifyDeviceConcurrency,
   claimThisDevice,
   requestEmailConfirmationResend,
-  createRazorpayPaymentLink,
-  verifyRazorpayPaymentLink,
-  verifyRazorpayPaymentId
+  checkManualPaymentStatus
 };
 
 if (typeof window !== "undefined") {
@@ -864,3 +566,4 @@ if (typeof self !== "undefined") {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { StepAuth: stepAuthExport };
 }
+

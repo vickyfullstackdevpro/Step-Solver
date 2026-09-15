@@ -3,6 +3,9 @@
 (function () {
   "use strict";
 
+  // Restrict extension to only activate on https://english.steptest.in/*
+  if (!window.location.href.startsWith("https://english.steptest.in/")) return;
+
   // Prevent multiple injections
   if (window.__GEMINI_SOLVER_INJECTED__) return;
   window.__GEMINI_SOLVER_INJECTED__ = true;
@@ -12,6 +15,8 @@
     isEnabled: true,
     isAutoWatch: false,
     isProcessing: false,
+    answerPopupEnabled: true,
+    autoSubmitEnabled: false,
     lastSolvedHash: "",
     lastSolvedQuestionId: "",
     solvedQuestionIds: new Set(),
@@ -30,13 +35,27 @@
   async function initHUD() {
     if (document.getElementById("gemini-live-host")) return;
 
-    // Load enabled state and pacing from storage
-    const stored = await chrome.storage.local.get(["extensionEnabled", "typingDelayMs"]);
+    // Load enabled state, pacing, answer popup, and auto-submit from storage
+    const stored = await chrome.storage.local.get([
+      "extensionEnabled",
+      "typingDelayMs",
+      "answerPopupEnabled",
+      "autoSubmitEnabled"
+    ]);
     if (stored.extensionEnabled !== undefined) {
       state.isEnabled = stored.extensionEnabled;
     }
     if (stored.typingDelayMs !== undefined) {
       state.typingDelayMs = stored.typingDelayMs;
+    }
+    if (stored.answerPopupEnabled !== undefined) {
+      state.answerPopupEnabled = stored.answerPopupEnabled;
+    }
+    if (stored.autoSubmitEnabled !== undefined) {
+      state.autoSubmitEnabled = stored.autoSubmitEnabled;
+      if (state.autoSubmitEnabled) {
+        ensureAnswerPageWatcher();
+      }
     }
 
     const host = document.createElement("div");
@@ -311,6 +330,12 @@
 
   // Answer Showcase Banner (Persists until moved to the next question)
   function showAnswerBanner(mainText, subText = "", typeTitle = "Correct Answer") {
+    // If Answer Popup setting is OFF, suppress the popup banner
+    if (state.answerPopupEnabled === false) {
+      hideAnswerBanner();
+      return;
+    }
+
     const banner = document.getElementById("gemini-answer-banner");
     const mainEl = document.getElementById("gemini-answer-main-text");
     const subEl = document.getElementById("gemini-answer-sub-text");
@@ -494,6 +519,7 @@
   }
 
   function findActiveQuestionContainer() {
+    if (isAnswerOrFeedbackPage()) return null;
     const meta = getCurrentQuestionMeta();
     const currentNum = meta.currentNum;
 
@@ -610,83 +636,51 @@
     );
   }
 
-  // Detect if current screen is the post-submission Answer / Feedback / Review page
-  // Detect if current screen is truly the post-submission Answer / Feedback / Review page
-  function isAnswerOrFeedbackPage(container) {
-    const scope = (container && container !== document.body) ? container : document.body;
+  // Detect if current screen is the post-submission Answer / Review / Feedback page.
+  // CRITICAL RULE: The answer / feedback page ONLY has the "Next" button,
+  // whereas the question page has the "Submit" button.
+  function isAnswerOrFeedbackPage() {
+    const nextBtn = findActionElement("next");
+    if (!nextBtn || !isElementVisible(nextBtn)) return false;
 
-    // 1. ACTIVE QUESTION CHECK: If any active interactive controls exist, it is NOT a feedback page!
-    // Check for rearrangement chips:
-    const activeTokens = findRearrangeTokens(scope);
-    if (activeTokens && activeTokens.length >= 3) {
-      return false; // Active rearrange question!
-    }
-
-    // Check all visible buttons on page (excluding our extension HUD)
-    const allButtons = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit'], a, div[role='button'], [class*='btn' i]"))
-      .filter(b => isElementVisible(b) && !b.closest("#gemini-live-host, #steptest-ai-banner, header, nav"));
-
-    // If there is a visible Reset button, it is an active question!
-    const hasResetBtn = allButtons.some(b => {
-      const t = safeText(b).toLowerCase();
-      return t.startsWith("reset");
-    });
-    if (hasResetBtn) {
-      return false;
-    }
-
-    // If there is a visible Submit button (even if disabled before answering), it is an active question!
-    const hasSubmitBtn = allButtons.some(b => {
-      const t = safeText(b).toLowerCase();
-      return t === "submit" || t.startsWith("submit");
-    });
-    if (hasSubmitBtn) {
-      return false;
-    }
-
-    // Check for interactive select/textarea/text inputs:
-    const activeInputs = Array.from(document.querySelectorAll("select, textarea, input[type='text']:not(.gemini-input)"))
-      .filter(el => isElementVisible(el) && !el.closest("#gemini-live-host, #steptest-ai-banner"));
-    if (activeInputs.length > 0) {
-      return false;
-    }
-
-    // 2. POST-SUBMISSION REQUIREMENTS:
-    // A post-submission feedback page MUST have a Next or Continue button:
-    const hasNextBtn = allButtons.some(b => {
-      const t = safeText(b).toLowerCase();
-      return t === "next" || t.startsWith("next") || t === "continue";
-    });
-
-    if (!hasNextBtn) {
-      return false; // No Next button -> cannot be post-submission review page
-    }
-
-    // 3. And MUST have site feedback elements outside our extension UI
-    const candidateFeedbackElements = Array.from(document.querySelectorAll(
-      ".feedback, .feedback-box, .explanation, .solution-box, [class*='feedback-content' i], [class*='feedback-card' i]"
-    )).filter(el => isElementVisible(el) && !el.closest("#gemini-live-host, #steptest-ai-banner"));
-
-    if (candidateFeedbackElements.length > 0) {
-      return true;
-    }
-
-    // Check for explicit site feedback text outside our extension
-    try {
-      const bodyClone = document.body.cloneNode(true);
-      bodyClone.querySelectorAll("#gemini-live-host, #steptest-ai-banner, script, style").forEach(el => el.remove());
-      const cleanText = safeText(bodyClone).toLowerCase();
-
-      if (
-        cleanText.includes("view all options") ||
-        cleanText.includes("hide all options") ||
-        /\bfeedback\b/i.test(cleanText)
-      ) {
+    // 1. Direct feedback DOM indicators on StepTest
+    const feedbackSelectors = [
+      ".feedback", ".feedback-box", ".feedback-card", ".feedback-container",
+      ".feedback-content", ".feedback-section", ".explanation", ".solution",
+      "[class*='feedback' i]", "[class*='explanation' i]", "[class*='solution' i]",
+      "[class*='answer-key' i]", "[class*='review' i]", "[class*='result' i]",
+      "[data-feedback]"
+    ];
+    for (const sel of feedbackSelectors) {
+      const el = document.querySelector(sel);
+      if (el && isElementVisible(el) && !el.closest("#gemini-live-host, #gemini-answer-banner")) {
         return true;
       }
-    } catch (_) {}
+    }
+
+    // 2. Keyword check across body text
+    const pageText = (document.body ? safeText(document.body) : "").toLowerCase();
+    const hasFeedbackKeywords = (
+      pageText.includes("correct answer:") ||
+      pageText.includes("your answer:") ||
+      pageText.includes("view all options") ||
+      pageText.includes("answer explanation") ||
+      pageText.includes("feedback:") ||
+      pageText.includes("solution:") ||
+      pageText.includes("review answer")
+    );
+    if (hasFeedbackKeywords) return true;
+
+    // 3. Button comparison: Next button present AND Submit button absent OR disabled
+    const submitBtn = findActionElement("submit");
+    if (!submitBtn) return true;
+    if (isButtonDisabled(submitBtn)) return true;
 
     return false;
+  }
+
+  function isAnswerPage() {
+    return isAnswerOrFeedbackPage();
   }
 
   // Check if current question is a Cloze / Multi-Blank Passage Question
@@ -1318,6 +1312,20 @@
   }
 
   function extractQuestionData(container) {
+    if (!container || isAnswerOrFeedbackPage()) {
+      return {
+        type: null,
+        questionText: "",
+        context: "",
+        options: [],
+        wordChoices: [],
+        dropdowns: [],
+        sentenceTokens: [],
+        writingConstraints: null,
+        domReferences: { options: [], wordChoices: [], textBlanks: [], dropdowns: [], sentenceTokens: [], writingArea: null, container: null }
+      };
+    }
+
     // 1. Identify Question Prompt Text (Strictly ignoring top header / navigation)
     let questionText = "";
 
@@ -2033,7 +2041,11 @@
     const subDisplay = solution.reconstructed_passage || solution.explanation || "All blanks filled in logical sequence";
     showAnswerBanner(bannerDisplay, subDisplay, "Passage Blanks Solved");
 
-    return placedCount > 0 ? `Filled ${placedCount} blanks: ${bannerDisplay}` : `Answer: ${bannerDisplay}`;
+    return {
+      success: placedCount > 0,
+      message: placedCount > 0 ? `Filled ${placedCount} blanks: ${bannerDisplay}` : `Answer: ${bannerDisplay}`,
+      clickedCount: placedCount
+    };
   }
 
   // Solve Choose the Correct Word
@@ -2079,7 +2091,11 @@
     }
 
     showAnswerBanner("Word choices updated", solution.explanation || "Selected correct vocabulary option", "Word Choice", 5000);
-    return actionsTaken > 0 ? `Selected/Filled ${actionsTaken} word choice(s)` : "Word choices updated";
+    return {
+      success: actionsTaken > 0,
+      message: actionsTaken > 0 ? `Selected/Filled ${actionsTaken} word choice(s)` : "Word choices updated",
+      clickedCount: actionsTaken
+    };
   }
 
   // Solve Rearrange the Sentence
@@ -2391,7 +2407,7 @@
 
     const words = textToInsert.split(/\s+/).filter(Boolean).length;
     showAnswerBanner(textToInsert.slice(0, 100) + (textToInsert.length > 100 ? "..." : ""), `Generated ${words} words response adhering to prompt requirements`, "Writing Answer", 8000);
-    return { success: true, message: `Typed ${words} words into answer box`, wordCount: words };
+    return { success: words > 0, message: `Typed ${words} words into answer box`, wordCount: words, clickedCount: words > 0 ? 1 : 0 };
   }
 
   // Solve Speaking Question
@@ -2445,7 +2461,7 @@
   // -------------------------------------------------------------
   function findActionElement(actionType) {
     const candidates = Array.from(
-      document.querySelectorAll("button, input[type='submit'], input[type='button'], a, div[role='button'], span[role='button'], [class*='btn' i], [class*='button' i], [role='button']")
+      document.querySelectorAll("button, input[type='submit'], input[type='button'], a, div[role='button'], span[role='button'], [role='button']")
     ).filter(el => {
       if (!el || el.closest("#gemini-live-host, #gemini-answer-banner, #gemini-teleprompter, #steptest-ai-banner")) return false;
       return isElementVisible(el);
@@ -2453,13 +2469,11 @@
 
     const isSubmitMatch = (rawTxt, el) => {
       const txt = (rawTxt || "").toLowerCase().trim();
-      if (/^(submit|save\s*&\s*next|check(?:\s*answer)?|verify|confirm)$/i.test(txt)) return true;
-      if (/^submit\b/i.test(txt) && !txt.includes("option")) return true;
-      if (/^check\b/i.test(txt) && !txt.includes("option")) return true;
+      if (txt === "submitted" || txt.includes("already submitted") || txt.includes("feedback")) return false;
+      if (/^(submit|submit\s+answer|save\s*&\s*next)$/i.test(txt)) return true;
+      if (/^submit\b/i.test(txt) && !txt.includes("option") && !txt.includes("feedback")) return true;
       const cls = (el.className || "").toString().toLowerCase();
-      const id = (el.id || "").toString().toLowerCase();
-      if (cls.includes("submit-btn") || cls.includes("btn-submit") || cls.includes("submit")) return true;
-      if (id.includes("submit")) return true;
+      if ((cls.includes("submit-btn") || cls.includes("btn-submit")) && !txt.includes("feedback") && !txt.includes("next")) return true;
       return false;
     };
 
@@ -2467,12 +2481,12 @@
       const txt = (rawTxt || "").toLowerCase().trim();
       if (/^(next|continue|proceed|next\s*question)$/i.test(txt)) return true;
       if (/^next\b/i.test(txt) && !txt.includes("option") && !txt.includes("question 1 of")) return true;
-      if (/^continue\b/i.test(txt)) return true;
+      if (/^continue\b/i.test(txt) && !txt.includes("option")) return true;
       if (/^proceed\b/i.test(txt)) return true;
       const cls = (el.className || "").toString().toLowerCase();
-      const id = (el.id || "").toString().toLowerCase();
-      if (cls.includes("next-btn") || cls.includes("btn-next")) return true;
-      if (id.includes("next")) return true;
+      if ((cls.includes("next-btn") || cls.includes("btn-next")) && !txt.includes("submit")) return true;
+      const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+      if (/^next\b/i.test(aria)) return true;
       return false;
     };
 
@@ -2516,6 +2530,103 @@
   }
 
   // -------------------------------------------------------------
+  // Auto-Submit & Auto-Next Execution Controllers
+  // -------------------------------------------------------------
+  let autoNextTimer = null;
+  let isAutoNextClicking = false;
+  let answerWatcherTimer = null;
+
+  function ensureAnswerPageWatcher() {
+    if (answerWatcherTimer) return;
+    answerWatcherTimer = setInterval(() => {
+      if (!state.isEnabled || !state.autoSubmitEnabled) return;
+      if (isAnswerOrFeedbackPage() && !autoNextTimer && !isAutoNextClicking) {
+        handleAutoNext();
+      }
+    }, 600);
+  }
+
+  async function handleAutoNext() {
+    if (!state.autoSubmitEnabled || isAutoNextClicking) return;
+    if (autoNextTimer) return;
+
+    // Provide immediate visual status: waiting 2 seconds before clicking Next
+    updateStatus("Next in 2s...", "working", "NEXT");
+    console.log("[Step Solver] Answer/Feedback page detected. Auto-Next scheduled in 2000ms (2s delay)...");
+
+    autoNextTimer = setTimeout(async () => {
+      autoNextTimer = null;
+      if (!state.autoSubmitEnabled || isAutoNextClicking) return;
+      if (!isAnswerOrFeedbackPage()) return;
+
+      const nextBtn = findActionElement("next");
+      if (nextBtn && !isButtonDisabled(nextBtn)) {
+        isAutoNextClicking = true;
+        console.log("[Step Solver] Auto-Next (2s elapsed): Clicking 'Next' on Answer page...");
+        showToast("Auto-advancing to next question...");
+        updateStatus("Advancing...", "working", "NEXT");
+        simulateClick(nextBtn);
+        await delay(1500);
+        isAutoNextClicking = false;
+      } else {
+        console.warn("[Step Solver] Auto-Next: Next button not found or disabled after 2s.");
+      }
+    }, 2000);
+  }
+
+  async function handleAutoSubmit() {
+    if (!state.autoSubmitEnabled) return;
+
+    // Never submit on Answer or Feedback page!
+    if (isAnswerOrFeedbackPage()) {
+      handleAutoNext();
+      return;
+    }
+
+    // Natural pacing delay so the user/UI confirms the selection before submission
+    const pacingDelay = Math.max(700, (state.typingDelayMs || 250) + 400);
+    await delay(pacingDelay);
+
+    // If moved to answer page during delay, trigger auto-next
+    if (isAnswerOrFeedbackPage()) {
+      handleAutoNext();
+      return;
+    }
+
+    const submitBtn = findActionElement("submit");
+    if (!submitBtn) {
+      console.warn("[Step Solver] Auto-Submit: Submit button not found on question page.");
+      return;
+    }
+
+    if (isButtonDisabled(submitBtn)) {
+      // If momentarily disabled while DOM processes the option click, wait briefly
+      await delay(600);
+    }
+
+    if (!isButtonDisabled(submitBtn)) {
+      console.log("[Step Solver] Auto-Submit: Submitting selected answer...");
+      showToast("Auto-submitting answer...");
+      simulateClick(submitBtn);
+
+      // Continuous transition watcher to detect Answer page after submission
+      let pollCount = 0;
+      const pollInterval = setInterval(() => {
+        pollCount++;
+        if (isAnswerOrFeedbackPage()) {
+          clearInterval(pollInterval);
+          console.log("[Step Solver] Auto-Submit: Transition to Answer page detected!");
+          handleAutoNext();
+        } else if (pollCount > 30) { // 30 * 300ms = 9s max
+          clearInterval(pollInterval);
+        }
+      }, 300);
+    } else {
+      console.warn("[Step Solver] Auto-Submit: Submit button is disabled. Submission skipped.");
+    }
+  }
+
+  // -------------------------------------------------------------
   // 5. Main Trigger Controller (Token-Saver Guarded)
   // -------------------------------------------------------------
   async function triggerSolve(isAutomated = false) {
@@ -2537,25 +2648,79 @@
       const teleprompter = document.getElementById("gemini-teleprompter");
       if (teleprompter) teleprompter.classList.remove("active");
 
-      const container = findActiveQuestionContainer();
-
-      // CRITICAL: If currently on the post-submission Answer / Feedback / Review page, DO NOT SOLVE!
-      if (isAnswerOrFeedbackPage(container)) {
-        console.log("%c[Gemini Live]%c Currently on Answer/Feedback review page. Skipping solve.", "color:#10b981;font-weight:bold", "color:#fff");
+      // CRITICAL: If currently on the post-submission Answer or Feedback page, DO NOT SOLVE!
+      if (isAnswerOrFeedbackPage()) {
+        console.log("%c[Step Solver]%c Currently on Answer/Feedback page. Skipping question search.", "color:#10b981;font-weight:bold", "color:#fff");
         hideAnswerBanner();
-        updateStatus("Answer / Feedback Page", "idle", "REVIEW");
+        updateStatus("Answer Page", "idle", "NEXT");
         if (!isAutomated) {
-          showToast("Currently on Answer / Feedback page. Click 'Next' to solve the next question.");
+          showToast("Answer page detected. Click 'Next' to solve the next question.");
+        }
+        if (state.autoSubmitEnabled) {
+          handleAutoNext();
         }
         return;
       }
 
-      const data = extractQuestionData(container);
+      const container = findActiveQuestionContainer();
+      if (!container && isAnswerOrFeedbackPage()) {
+        return;
+      }
+
+      let data = extractQuestionData(container);
+
+      // CRITICAL: If question prompt is present but options/interactive elements have not rendered yet,
+      // wait briefly for the DOM to finish rendering options instead of sending empty options to Gemini!
+      const hasInteractiveControls = (
+        (data.options && data.options.length > 0) ||
+        (data.sentenceTokens && data.sentenceTokens.length >= 3) ||
+        (data.wordChoices && data.wordChoices.length >= 2) ||
+        (data.dropdowns && data.dropdowns.length > 0) ||
+        !!data.domReferences?.writingArea ||
+        data.type === "speaking"
+      );
+
+      if (!hasInteractiveControls && data.questionText) {
+        // Wait up to 1200ms (checking every 200ms) for options to render
+        for (let waitStep = 0; waitStep < 6; waitStep++) {
+          await delay(200);
+          if (isAnswerOrFeedbackPage()) return;
+          const freshContainer = findActiveQuestionContainer();
+          data = extractQuestionData(freshContainer || container);
+          if (
+            (data.options && data.options.length > 0) ||
+            (data.sentenceTokens && data.sentenceTokens.length >= 3) ||
+            (data.wordChoices && data.wordChoices.length >= 2) ||
+            (data.dropdowns && data.dropdowns.length > 0) ||
+            !!data.domReferences?.writingArea ||
+            data.type === "speaking"
+          ) {
+            break;
+          }
+        }
+      }
 
       // If page is between questions / transitioning / no question content yet, do not trigger
-      if (!data.questionText && (!data.options || data.options.length === 0) && (!data.sentenceTokens || data.sentenceTokens.length === 0) && (!data.wordChoices || data.wordChoices.length === 0) && (!data.dropdowns || data.dropdowns.length === 0) && !data.domReferences.writingArea) {
+      if (!data.questionText && (!data.options || data.options.length === 0) && (!data.sentenceTokens || data.sentenceTokens.length === 0) && (!data.wordChoices || data.wordChoices.length === 0) && (!data.dropdowns || data.dropdowns.length === 0) && !data.domReferences?.writingArea) {
         if (!isAutomated) {
           showToast("No active question detected. Please ensure the question has loaded.");
+        }
+        return;
+      }
+
+      const finalHasControls = (
+        (data.options && data.options.length > 0) ||
+        (data.sentenceTokens && data.sentenceTokens.length >= 3) ||
+        (data.wordChoices && data.wordChoices.length >= 2) ||
+        (data.dropdowns && data.dropdowns.length > 0) ||
+        !!data.domReferences?.writingArea ||
+        data.type === "speaking"
+      );
+
+      if (!finalHasControls && data.questionText) {
+        console.log("[Step Solver] Question prompt present, but options/controls not yet rendered in DOM. Waiting...");
+        if (!isAutomated) {
+          showToast("Question options are loading. Please wait a moment.");
         }
         return;
       }
@@ -2707,6 +2872,33 @@
       updateStatus("Done", "idle", targetType.toUpperCase());
       showToast(resultMsg);
 
+      // CRITICAL: Auto-Submit execution logic
+      // The auto submit will click the submit button after getting the answer from Gemini and clicked on the options only.
+      // NEVER submit empty answer!
+      let effectiveClickedCount = 0;
+      if (solveResult && typeof solveResult === "object") {
+        effectiveClickedCount = solveResult.clickedCount || (solveResult.wordCount > 0 ? 1 : 0) || 0;
+      } else if (typeof solveResult === "string" && !solveResult.toLowerCase().includes("could not") && !solveResult.toLowerCase().includes("no tokens") && !solveResult.toLowerCase().includes("0 blanks")) {
+        effectiveClickedCount = 1;
+      }
+
+      if (state.autoSubmitEnabled && isSuccess) {
+        if (isAnswerOrFeedbackPage()) {
+          console.log("[Step Solver] Answer/Feedback page detected post-solve. Halting submit, triggering Auto-Next.");
+          handleAutoNext();
+        } else if (targetType === "speaking" && (!data.domReferences.options || data.domReferences.options.length === 0)) {
+          console.log("[Step Solver] Speaking task: Auto-submit paused until user records speech.");
+        } else if (effectiveClickedCount > 0) {
+          console.log(`[Step Solver] Auto-Submit: Verified non-empty answer (${effectiveClickedCount} item(s)). Triggering submit...`);
+          await handleAutoSubmit();
+        } else {
+          console.warn("[Step Solver] Auto-submit blocked: No options were selected/filled. Empty answers are NEVER submitted.");
+          if (!isAnswerOrFeedbackPage()) {
+            showToast("Auto-Submit skipped: No option selected");
+          }
+        }
+      }
+
     } catch (err) {
       console.error("[Gemini Live Solver Error]:", err);
       updateStatus("Error", "error", "FAILED");
@@ -2749,11 +2941,15 @@
       clearTimeout(autoWatchDebounce);
       autoWatchDebounce = setTimeout(() => {
         if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
-        const container = findActiveQuestionContainer();
-        if (isAnswerOrFeedbackPage(container)) {
+        if (isAnswerOrFeedbackPage()) {
           hideAnswerBanner();
+          if (state.autoSubmitEnabled) {
+            handleAutoNext();
+          }
           return;
         }
+        const container = findActiveQuestionContainer();
+        if (!container) return;
         const data = extractQuestionData(container);
         const currentId = getQuestionIdentifier(container, data);
         if (currentId && !state.solvedQuestionIds.has(currentId) && currentId !== state.lastSolvedQuestionId) {
@@ -2770,10 +2966,15 @@
     // Also check every 2 seconds to detect if user advanced to next question
     autoWatchInterval = setInterval(() => {
       if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
-      const container = findActiveQuestionContainer();
-      if (isAnswerOrFeedbackPage(container)) {
+      if (isAnswerOrFeedbackPage()) {
+        hideAnswerBanner();
+        if (state.autoSubmitEnabled) {
+          handleAutoNext();
+        }
         return;
       }
+      const container = findActiveQuestionContainer();
+      if (!container) return;
       const data = extractQuestionData(container);
       const currentId = getQuestionIdentifier(container, data);
       if (currentId && !state.solvedQuestionIds.has(currentId) && currentId !== state.lastSolvedQuestionId) {
@@ -2815,6 +3016,19 @@
     } else if (msg.action === "EXTENSION_POWER_TOGGLED") {
       toggleExtensionPower(msg.enabled);
       sendResponse({ enabled: state.isEnabled });
+    } else if (msg.action === "ANSWER_POPUP_TOGGLED") {
+      state.answerPopupEnabled = msg.enabled;
+      if (!msg.enabled) hideAnswerBanner();
+      sendResponse({ answerPopupEnabled: state.answerPopupEnabled });
+    } else if (msg.action === "AUTO_SUBMIT_TOGGLED") {
+      state.autoSubmitEnabled = msg.enabled;
+      if (state.autoSubmitEnabled) {
+        ensureAnswerPageWatcher();
+        if (isAnswerOrFeedbackPage()) {
+          handleAutoNext();
+        }
+      }
+      sendResponse({ autoSubmitEnabled: state.autoSubmitEnabled });
     }
   });
 
@@ -2823,6 +3037,19 @@
     if (area === "local") {
       if (changes.extensionEnabled !== undefined) {
         toggleExtensionPower(changes.extensionEnabled.newValue);
+      }
+      if (changes.answerPopupEnabled !== undefined) {
+        state.answerPopupEnabled = changes.answerPopupEnabled.newValue;
+        if (!state.answerPopupEnabled) hideAnswerBanner();
+      }
+      if (changes.autoSubmitEnabled !== undefined) {
+        state.autoSubmitEnabled = changes.autoSubmitEnabled.newValue;
+        if (state.autoSubmitEnabled) {
+          ensureAnswerPageWatcher();
+          if (isAnswerOrFeedbackPage()) {
+            handleAutoNext();
+          }
+        }
       }
     }
   });
