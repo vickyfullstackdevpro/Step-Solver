@@ -17,6 +17,10 @@
     isProcessing: false,
     answerPopupEnabled: true,
     autoSubmitEnabled: false,
+    autoPlayVideoEnabled: true,
+    antiTabSwitchEnabled: true,
+    keepWebsiteActiveEnabled: true,
+    playedVideoKeys: new Set(),
     lastSolvedHash: "",
     lastSolvedQuestionId: "",
     solvedQuestionIds: new Set(),
@@ -35,12 +39,15 @@
   async function initHUD() {
     if (document.getElementById("gemini-live-host")) return;
 
-    // Load enabled state, pacing, answer popup, and auto-submit from storage
+    // Load enabled state, pacing, answer popup, and automation settings from storage
     const stored = await chrome.storage.local.get([
       "extensionEnabled",
       "typingDelayMs",
       "answerPopupEnabled",
-      "autoSubmitEnabled"
+      "autoSubmitEnabled",
+      "autoPlayVideoEnabled",
+      "antiTabSwitchEnabled",
+      "keepWebsiteActiveEnabled"
     ]);
     if (stored.extensionEnabled !== undefined) {
       state.isEnabled = stored.extensionEnabled;
@@ -57,6 +64,22 @@
         ensureAnswerPageWatcher();
       }
     }
+    if (stored.autoPlayVideoEnabled !== undefined) {
+      state.autoPlayVideoEnabled = stored.autoPlayVideoEnabled;
+    }
+    if (stored.antiTabSwitchEnabled !== undefined) {
+      state.antiTabSwitchEnabled = stored.antiTabSwitchEnabled;
+    }
+    if (stored.keepWebsiteActiveEnabled !== undefined) {
+      state.keepWebsiteActiveEnabled = stored.keepWebsiteActiveEnabled;
+    }
+
+    // Initialize MAIN world protection, keep-active heartbeat, and video watcher
+    ensureMainWorldProtectionScript();
+    syncProtectionSettings();
+    initKeepWebsiteActive();
+    ensureVideoWatcher();
+    handleAutoPlayVideo();
 
     const host = document.createElement("div");
     host.id = "gemini-live-host";
@@ -2627,13 +2650,176 @@
   }
 
   // -------------------------------------------------------------
+  // Video Auto-Play & Keep-Alive Protection Controllers
+  // -------------------------------------------------------------
+  function ensureMainWorldProtectionScript() {
+    if (document.getElementById("step-solver-main-shield")) return;
+    try {
+      const s = document.createElement("script");
+      s.id = "step-solver-main-shield";
+      s.src = chrome.runtime.getURL("page_protection.js");
+      (document.head || document.documentElement).appendChild(s);
+    } catch (_) {}
+  }
+
+  function syncProtectionSettings() {
+    try {
+      window.postMessage({
+        source: "STEP_SOLVER_CONTENT",
+        type: "SYNC_PROTECTION_SETTINGS",
+        settings: {
+          antiTabSwitchEnabled: state.antiTabSwitchEnabled,
+          keepWebsiteActiveEnabled: state.keepWebsiteActiveEnabled
+        }
+      }, "*");
+    } catch (_) {}
+  }
+
+  let keepActiveInterval = null;
+  function initKeepWebsiteActive() {
+    if (keepActiveInterval) clearInterval(keepActiveInterval);
+    keepActiveInterval = setInterval(() => {
+      if (!state.isEnabled || !state.keepWebsiteActiveEnabled) return;
+      try {
+        const evt = new MouseEvent("mousemove", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: Math.floor(Math.random() * 20) + 10,
+          clientY: Math.floor(Math.random() * 20) + 10
+        });
+        document.dispatchEvent(evt);
+      } catch (_) {}
+    }, 25000);
+  }
+
+  function getYouTubeVideoKey(iframe) {
+    if (!iframe) return null;
+    const src = iframe.src || iframe.getAttribute("data-src") || "";
+    if (!src) return null;
+    const match = src.match(/(?:embed\/|v=|vi=|\/v\/|\/vi\/|youtu\.be\/|\/e\/)([a-zA-Z0-9_-]{11})/i);
+    if (match && match[1]) {
+      return `yt_${match[1]}`;
+    }
+    // Fallback: clean URL without query
+    return `yt_${src.split("?")[0]}`;
+  }
+
+  function getHTML5VideoKey(video) {
+    if (!video) return null;
+    const src = video.currentSrc || video.src || video.querySelector("source")?.src || "";
+    if (src) {
+      return `html5_${src.split("?")[0]}`;
+    }
+    const container = video.closest(".video-container, .question-video, .video-player, [class*='video' i]");
+    if (container && container.id) {
+      return `html5_container_${container.id}`;
+    }
+    return `html5_video_${video.id || "default"}`;
+  }
+
+  function playYouTubeIframe(iframe) {
+    try {
+      // Ensure enablejsapi=1 is present
+      if (iframe.src && !iframe.src.includes("enablejsapi=1")) {
+        const sep = iframe.src.includes("?") ? "&" : "?";
+        iframe.src = iframe.src + sep + "enablejsapi=1";
+      }
+      iframe.contentWindow.postMessage(JSON.stringify({
+        event: "command",
+        func: "playVideo",
+        args: ""
+      }), "*");
+    } catch (_) {}
+
+    // Fallback simulate click on iframe or play overlay
+    try {
+      simulateClick(iframe);
+      const playBtn = iframe.parentElement?.querySelector("button, [class*='play' i], .ytp-large-play-button");
+      if (playBtn) simulateClick(playBtn);
+    } catch (_) {}
+  }
+
+  async function playHTML5Video(video) {
+    try {
+      if (video.paused) {
+        try {
+          await video.play();
+        } catch (err) {
+          console.log("[Step Solver] Autoplay unmuted blocked, retrying muted...");
+          video.muted = true;
+          await video.play();
+          setTimeout(() => { video.muted = false; }, 600);
+        }
+      }
+    } catch (_) {}
+
+    // Custom controls click fallback
+    try {
+      const playBtn = video.parentElement?.querySelector(".vjs-play-control, .play-btn, button[class*='play' i], [aria-label*='play' i]");
+      if (playBtn && video.paused) {
+        simulateClick(playBtn);
+      }
+    } catch (_) {}
+  }
+
+  function handleAutoPlayVideo() {
+    if (!state.isEnabled || !state.autoPlayVideoEnabled) return;
+
+    // Do not attempt to play video on answer / feedback page
+    if (isAnswerOrFeedbackPage()) return;
+
+    // 1. YouTube iframes
+    const iframes = Array.from(document.querySelectorAll("iframe")).filter(f => {
+      if (!isElementVisible(f) || f.closest("#gemini-live-host")) return false;
+      const s = (f.src || "").toLowerCase();
+      return s.includes("youtube.com") || s.includes("youtube-nocookie.com") || s.includes("youtu.be");
+    });
+
+    for (const iframe of iframes) {
+      const key = getYouTubeVideoKey(iframe);
+      if (key && !state.playedVideoKeys.has(key)) {
+        state.playedVideoKeys.add(key);
+        console.log(`%c[Step Solver]%c Auto-playing new YouTube video: ${key}`, "color:#3b82f6;font-weight:bold", "color:#fff");
+        playYouTubeIframe(iframe);
+        showToast("Auto-playing video...");
+      }
+    }
+
+    // 2. HTML5 native videos
+    const html5Videos = Array.from(document.querySelectorAll("video")).filter(v => {
+      return isElementVisible(v) && !v.closest("#gemini-live-host");
+    });
+
+    for (const video of html5Videos) {
+      const key = getHTML5VideoKey(video);
+      if (key && !state.playedVideoKeys.has(key)) {
+        state.playedVideoKeys.add(key);
+        console.log(`%c[Step Solver]%c Auto-playing new HTML5 video: ${key}`, "color:#3b82f6;font-weight:bold", "color:#fff");
+        playHTML5Video(video);
+        showToast("Auto-playing video...");
+      }
+    }
+  }
+
+  let videoWatcherInterval = null;
+  function ensureVideoWatcher() {
+    if (videoWatcherInterval) return;
+    videoWatcherInterval = setInterval(() => {
+      if (!state.isEnabled || !state.autoPlayVideoEnabled) return;
+      handleAutoPlayVideo();
+    }, 1500);
+  }
+
+  // -------------------------------------------------------------
   // 5. Main Trigger Controller (Token-Saver Guarded)
   // -------------------------------------------------------------
   async function triggerSolve(isAutomated = false) {
     if (!state.isEnabled) return;
 
     try {
-      // If user clicked manually ("Solve Current" or Alt+S), instantly unfreeze any stuck processing state
+      // If currently on question page, check if video needs auto-playing
+      handleAutoPlayVideo();
       if (!isAutomated) {
         state.isProcessing = false;
       } else if (state.isProcessing) {
@@ -2948,6 +3134,7 @@
           }
           return;
         }
+        handleAutoPlayVideo();
         const container = findActiveQuestionContainer();
         if (!container) return;
         const data = extractQuestionData(container);
@@ -3029,6 +3216,20 @@
         }
       }
       sendResponse({ autoSubmitEnabled: state.autoSubmitEnabled });
+    } else if (msg.action === "AUTO_PLAY_VIDEO_TOGGLED") {
+      state.autoPlayVideoEnabled = msg.enabled;
+      if (state.autoPlayVideoEnabled) {
+        handleAutoPlayVideo();
+      }
+      sendResponse({ autoPlayVideoEnabled: state.autoPlayVideoEnabled });
+    } else if (msg.action === "ANTI_TAB_SWITCH_TOGGLED") {
+      state.antiTabSwitchEnabled = msg.enabled;
+      syncProtectionSettings();
+      sendResponse({ antiTabSwitchEnabled: state.antiTabSwitchEnabled });
+    } else if (msg.action === "KEEP_ACTIVE_TOGGLED") {
+      state.keepWebsiteActiveEnabled = msg.enabled;
+      syncProtectionSettings();
+      sendResponse({ keepWebsiteActiveEnabled: state.keepWebsiteActiveEnabled });
     }
   });
 
@@ -3050,6 +3251,20 @@
             handleAutoNext();
           }
         }
+      }
+      if (changes.autoPlayVideoEnabled !== undefined) {
+        state.autoPlayVideoEnabled = changes.autoPlayVideoEnabled.newValue;
+        if (state.autoPlayVideoEnabled) {
+          handleAutoPlayVideo();
+        }
+      }
+      if (changes.antiTabSwitchEnabled !== undefined) {
+        state.antiTabSwitchEnabled = changes.antiTabSwitchEnabled.newValue;
+        syncProtectionSettings();
+      }
+      if (changes.keepWebsiteActiveEnabled !== undefined) {
+        state.keepWebsiteActiveEnabled = changes.keepWebsiteActiveEnabled.newValue;
+        syncProtectionSettings();
       }
     }
   });

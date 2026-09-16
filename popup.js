@@ -644,7 +644,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     "typingDelayMs",
     "extensionEnabled",
     "answerPopupEnabled",
-    "autoSubmitEnabled"
+    "autoSubmitEnabled",
+    "autoPlayVideoEnabled",
+    "antiTabSwitchEnabled",
+    "keepWebsiteActiveEnabled"
   ]);
 
   const isEnabled = stored.extensionEnabled !== false;
@@ -772,6 +775,80 @@ document.addEventListener("DOMContentLoaded", async () => {
         chrome.tabs.sendMessage(tab.id, {
           action: "AUTO_SUBMIT_TOGGLED",
           enabled: enabled
+        }).catch(() => {});
+      });
+    });
+  }
+
+  // -------------------------------------------------------------
+  // Auto-Play Video Toggle (Default: ON / true)
+  // -------------------------------------------------------------
+  const toggleAutoPlayVideo = document.getElementById("toggle-auto-play-video");
+  const autoPlayVideoBadge = document.getElementById("auto-play-video-badge");
+  const isAutoPlayVideo = stored.autoPlayVideoEnabled !== false;
+
+  if (toggleAutoPlayVideo) {
+    toggleAutoPlayVideo.checked = isAutoPlayVideo;
+    updateBadgeUI(autoPlayVideoBadge, isAutoPlayVideo);
+
+    toggleAutoPlayVideo.addEventListener("change", async (e) => {
+      const val = e.target.checked;
+      updateBadgeUI(autoPlayVideoBadge, val);
+      await chrome.storage.local.set({ autoPlayVideoEnabled: val });
+      broadcastTabMessage("AUTO_PLAY_VIDEO_TOGGLED", { enabled: val });
+    });
+  }
+
+  // -------------------------------------------------------------
+  // Anti-Tab-Switching Protection Toggle (Default: ON / true)
+  // -------------------------------------------------------------
+  const toggleAntiTabSwitch = document.getElementById("toggle-anti-tab-switch");
+  const antiTabSwitchBadge = document.getElementById("anti-tab-switch-badge");
+  const isAntiTabSwitch = stored.antiTabSwitchEnabled !== false;
+
+  if (toggleAntiTabSwitch) {
+    toggleAntiTabSwitch.checked = isAntiTabSwitch;
+    updateBadgeUI(antiTabSwitchBadge, isAntiTabSwitch);
+
+    toggleAntiTabSwitch.addEventListener("change", async (e) => {
+      const val = e.target.checked;
+      updateBadgeUI(antiTabSwitchBadge, val);
+      await chrome.storage.local.set({ antiTabSwitchEnabled: val });
+      broadcastTabMessage("ANTI_TAB_SWITCH_TOGGLED", { enabled: val });
+    });
+  }
+
+  // -------------------------------------------------------------
+  // Keep Website Active Toggle (Default: ON / true)
+  // -------------------------------------------------------------
+  const toggleKeepActive = document.getElementById("toggle-keep-active");
+  const keepActiveBadge = document.getElementById("keep-active-badge");
+  const isKeepActive = stored.keepWebsiteActiveEnabled !== false;
+
+  if (toggleKeepActive) {
+    toggleKeepActive.checked = isKeepActive;
+    updateBadgeUI(keepActiveBadge, isKeepActive);
+
+    toggleKeepActive.addEventListener("change", async (e) => {
+      const val = e.target.checked;
+      updateBadgeUI(keepActiveBadge, val);
+      await chrome.storage.local.set({ keepWebsiteActiveEnabled: val });
+      broadcastTabMessage("KEEP_ACTIVE_TOGGLED", { enabled: val });
+    });
+  }
+
+  function updateBadgeUI(badgeEl, enabled) {
+    if (!badgeEl) return;
+    badgeEl.innerText = enabled ? "ON" : "OFF";
+    badgeEl.className = `badge-pill ${enabled ? "active" : "off"}`;
+  }
+
+  function broadcastTabMessage(action, payload) {
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach((tab) => {
+        chrome.tabs.sendMessage(tab.id, {
+          action: action,
+          ...payload
         }).catch(() => {});
       });
     });
