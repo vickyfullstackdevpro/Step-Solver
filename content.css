@@ -1,22 +1,18 @@
 /* ==========================================================================
-   content.css - Liquid Glass UI for Gemini Live Assistant HUD & Teleprompter
+   content.css - Pure Black & White Liquid Glass UI for Gemini Live Assistant
    ========================================================================== */
 
 :root {
-  --gemini-primary: #6366f1;
-  --gemini-primary-hover: #4f46e5;
-  --gemini-primary-gradient: linear-gradient(135deg, rgba(99, 102, 241, 0.92) 0%, rgba(139, 92, 246, 0.92) 50%, rgba(6, 182, 212, 0.92) 100%);
-  --gemini-primary-gradient-hover: linear-gradient(135deg, rgba(79, 70, 229, 0.95) 0%, rgba(124, 58, 237, 0.95) 50%, rgba(8, 145, 178, 0.95) 100%);
-  --gemini-accent: #38bdf8;
-  --gemini-success: #10b981;
-  --gemini-warning: #f59e0b;
-  --gemini-danger: #ef4444;
-  --gemini-glass-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.02) 100%), rgba(8, 14, 28, 0.82);
-  --gemini-card-bg: rgba(15, 23, 42, 0.75);
-  --gemini-border: rgba(255, 255, 255, 0.22);
+  --gemini-noir-bg: rgba(8, 8, 12, 0.88);
+  --gemini-noir-card: rgba(16, 16, 20, 0.8);
+  --gemini-white: #ffffff;
+  --gemini-silver-100: #f4f4f5;
+  --gemini-silver-300: #d4d4d8;
+  --gemini-silver-400: #a1a1aa;
+  --gemini-silver-600: #52525b;
+  --gemini-border: rgba(255, 255, 255, 0.18);
+  --gemini-border-bright: rgba(255, 255, 255, 0.4);
   --gemini-specular: inset 0 1.5px 1.5px 0 rgba(255, 255, 255, 0.45);
-  --gemini-text: #ffffff;
-  --gemini-text-muted: #94a3b8;
   --gemini-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --gemini-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
@@ -42,44 +38,45 @@
 }
 
 /* ==========================================================================
-   Floating Control Widget (Liquid Crystal Slab)
+   Floating Control Widget (Noir Optical Glass Dock)
    ========================================================================== */
 .gemini-widget {
   position: fixed;
   top: 24px;
   right: 24px;
   width: 328px;
-  background: var(--gemini-glass-bg);
-  backdrop-filter: blur(32px) saturate(220%);
-  -webkit-backdrop-filter: blur(32px) saturate(220%);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.01) 100%),
+              var(--gemini-noir-bg);
+  backdrop-filter: blur(28px) saturate(120%);
+  -webkit-backdrop-filter: blur(28px) saturate(120%);
   border: 1px solid var(--gemini-border);
-  border-radius: 22px;
+  border-radius: 20px;
   box-shadow: 
-    0 24px 60px -8px rgba(0, 0, 0, 0.8),
+    0 24px 60px -8px rgba(0, 0, 0, 0.9),
     var(--gemini-specular),
-    inset 0 -1.5px 1px 0 rgba(0, 0, 0, 0.35),
-    0 0 30px -4px rgba(99, 102, 241, 0.35);
-  color: var(--gemini-text);
+    inset 0 -1.5px 1px 0 rgba(0, 0, 0, 0.5),
+    0 0 20px rgba(255, 255, 255, 0.06);
+  color: var(--gemini-white);
   overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
 }
 
 .gemini-widget:hover {
-  border-color: rgba(255, 255, 255, 0.32);
+  border-color: var(--gemini-border-bright);
   box-shadow: 
-    0 28px 70px -8px rgba(0, 0, 0, 0.85),
-    inset 0 2px 2px 0 rgba(255, 255, 255, 0.6),
-    0 0 36px -4px rgba(99, 102, 241, 0.45);
+    0 28px 70px -8px rgba(0, 0, 0, 0.95),
+    inset 0 2px 2px 0 rgba(255, 255, 255, 0.55),
+    0 0 24px rgba(255, 255, 255, 0.1);
 }
 
 .gemini-widget.minimized {
   width: auto;
   border-radius: 9999px;
   box-shadow: 
-    0 12px 32px rgba(0, 0, 0, 0.7),
+    0 12px 32px rgba(0, 0, 0, 0.8),
     var(--gemini-specular),
-    0 0 24px rgba(99, 102, 241, 0.35);
+    0 0 20px rgba(255, 255, 255, 0.08);
 }
 
 .gemini-widget.minimized .gemini-widget-body {
@@ -92,8 +89,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 11px 16px;
-  background: rgba(255, 255, 255, 0.05);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   cursor: grab;
 }
 
@@ -117,12 +114,12 @@
 }
 
 .gemini-sparkle-icon {
-  width: 19px;
-  height: 19px;
+  width: 18px;
+  height: 18px;
   fill: none;
-  stroke: url(#gemini-gradient);
+  stroke: #ffffff;
   flex-shrink: 0;
-  filter: drop-shadow(0 0 6px rgba(99, 102, 241, 0.6));
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.5));
 }
 
 .gemini-header-actions {
@@ -134,7 +131,7 @@
 .gemini-icon-btn {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  color: var(--gemini-text-muted);
+  color: var(--gemini-silver-400);
   cursor: pointer;
   padding: 5px;
   border-radius: 8px;
@@ -142,11 +139,11 @@
   align-items: center;
   justify-content: center;
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15);
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
 }
 
 .gemini-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.3);
   color: #ffffff;
 }
@@ -164,11 +161,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.45);
   padding: 7px 12px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .gemini-status-indicator {
@@ -176,30 +173,30 @@
   align-items: center;
   gap: 8px;
   font-size: 11.5px;
-  color: #cbd5e1;
+  color: var(--gemini-silver-300);
 }
 
 .gemini-pulse-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--gemini-success);
-  box-shadow: 0 0 10px var(--gemini-success);
+  background: #ffffff;
+  box-shadow: 0 0 8px #ffffff;
   transition: background 0.2s;
 }
 
 .gemini-pulse-dot.working {
-  background: var(--gemini-warning);
-  box-shadow: 0 0 12px var(--gemini-warning);
-  animation: gemini-blink 1s infinite alternate;
+  background: #ffffff;
+  box-shadow: 0 0 12px #ffffff;
+  animation: noirPulseDot 1s infinite alternate;
 }
 
 .gemini-pulse-dot.error {
-  background: var(--gemini-danger);
-  box-shadow: 0 0 12px var(--gemini-danger);
+  background: var(--gemini-silver-400);
+  box-shadow: 0 0 6px var(--gemini-silver-400);
 }
 
-@keyframes gemini-blink {
+@keyframes noirPulseDot {
   from { opacity: 0.35; transform: scale(0.85); }
   to { opacity: 1; transform: scale(1.2); }
 }
@@ -209,15 +206,15 @@
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  background: rgba(99, 102, 241, 0.22);
-  color: #c7d2fe;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
   padding: 3px 8px;
   border-radius: 6px;
-  border: 1px solid rgba(99, 102, 241, 0.4);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2);
 }
 
-/* Primary Action Buttons (Liquid Jelly Capsule) */
+/* Primary Action Buttons (Liquid Chrome Pill) */
 .gemini-button-group {
   display: flex;
   flex-direction: column;
@@ -231,18 +228,16 @@
   gap: 8px;
   width: 100%;
   padding: 11px 16px;
-  background: var(--gemini-primary-gradient);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: linear-gradient(180deg, #ffffff 0%, #e4e4e7 100%);
+  border: 1px solid #ffffff;
   border-radius: 12px;
-  color: #ffffff;
+  color: #000000;
   font-weight: 800;
   font-size: 13px;
   cursor: pointer;
   box-shadow: 
-    0 8px 24px -2px rgba(99, 102, 241, 0.55),
-    inset 0 1.5px 1px rgba(255, 255, 255, 0.6);
+    0 8px 24px rgba(255, 255, 255, 0.22),
+    inset 0 1.5px 1px rgba(255, 255, 255, 1);
   transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
   position: relative;
   overflow: hidden;
@@ -255,7 +250,7 @@
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
   transition: left 0.7s ease;
 }
 
@@ -264,18 +259,19 @@
 }
 
 .gemini-btn-primary:hover {
-  transform: translateY(-2px) scale(1.01);
+  transform: translateY(-2px);
+  background: #ffffff;
   box-shadow: 
-    0 12px 30px -2px rgba(99, 102, 241, 0.7),
-    inset 0 2px 2px rgba(255, 255, 255, 0.75);
+    0 12px 30px rgba(255, 255, 255, 0.35),
+    0 0 16px rgba(255, 255, 255, 0.2);
 }
 
 .gemini-btn-primary:active {
-  transform: translateY(1px) scale(0.98);
+  transform: translateY(1px);
 }
 
 .gemini-btn-primary:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
   transform: none;
 }
@@ -298,8 +294,8 @@
 }
 
 .gemini-btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 /* Toggle Switch */
@@ -320,11 +316,11 @@
   position: absolute;
   cursor: pointer;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: rgba(0, 0, 0, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 34px;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
-  transition: 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  transition: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .gemini-slider:before {
@@ -334,27 +330,27 @@
   width: 14px;
   left: 2px;
   bottom: 2px;
-  background-color: white;
+  background-color: #ffffff;
   border-radius: 50%;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
-  transition: 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transition: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 input:checked + .gemini-slider {
-  background: var(--gemini-primary-gradient);
-  border-color: rgba(255, 255, 255, 0.4);
-  box-shadow: 0 0 12px rgba(99, 102, 241, 0.5);
+  background: #ffffff;
+  border-color: #ffffff;
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.45);
 }
 
 input:checked + .gemini-slider:before {
   transform: translateX(16px);
-  box-shadow: 0 0 8px #fff;
+  background-color: #000000;
 }
 
 /* Result / Explanation Box */
 .gemini-info-box {
   display: none;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -362,10 +358,10 @@ input:checked + .gemini-slider:before {
   padding: 10px 12px;
   font-size: 12px;
   line-height: 1.45;
-  color: #e2e8f0;
+  color: var(--gemini-silver-200);
   max-height: 95px;
   overflow-y: auto;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .gemini-info-box.visible {
@@ -373,7 +369,7 @@ input:checked + .gemini-slider:before {
 }
 
 /* ==========================================================================
-   SPEAKING TELEPROMPTER MODAL / OVERLAY (Liquid Cinematic Screen)
+   SPEAKING TELEPROMPTER MODAL / OVERLAY (Monochrome Liquid Cinema)
    ========================================================================== */
 .gemini-teleprompter-overlay {
   display: none;
@@ -382,28 +378,28 @@ input:checked + .gemini-slider:before {
   left: 50%;
   transform: translateX(-50%);
   width: min(640px, 92vw);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.02) 100%),
-              rgba(8, 14, 28, 0.88);
-  backdrop-filter: blur(36px) saturate(230%);
-  -webkit-backdrop-filter: blur(36px) saturate(230%);
-  border: 1px solid rgba(99, 102, 241, 0.5);
-  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.01) 100%),
+              rgba(10, 10, 14, 0.92);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 20px;
   box-shadow: 
-    0 24px 64px -8px rgba(0, 0, 0, 0.85),
+    0 24px 64px -8px rgba(0, 0, 0, 0.95),
     var(--gemini-specular),
-    0 0 40px rgba(99, 102, 241, 0.35);
-  color: var(--gemini-text);
+    0 0 32px rgba(255, 255, 255, 0.1);
+  color: var(--gemini-white);
   overflow: hidden;
   z-index: 2147483647;
-  animation: gemini-liquid-slide 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: gemini-noir-slide 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .gemini-teleprompter-overlay.active {
   display: block;
 }
 
-@keyframes gemini-liquid-slide {
-  from { opacity: 0; transform: translate(-50%, 24px); }
+@keyframes gemini-noir-slide {
+  from { opacity: 0; transform: translate(-50%, 20px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
@@ -412,8 +408,8 @@ input:checked + .gemini-slider:before {
   align-items: center;
   justify-content: space-between;
   padding: 13px 20px;
-  background: rgba(255, 255, 255, 0.05);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .gemini-teleprompter-title {
@@ -428,20 +424,20 @@ input:checked + .gemini-slider:before {
 .gemini-teleprompter-badge {
   font-size: 11px;
   font-weight: 700;
-  background: rgba(16, 185, 129, 0.2);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
   padding: 3px 9px;
-  border-radius: var(--radius-pill);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.3);
+  border-radius: 9999px;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25);
 }
 
 .gemini-dropdown-auto-notice {
-  background: rgba(56, 189, 248, 0.14);
-  border-bottom: 1px solid rgba(56, 189, 248, 0.3);
+  background: rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
   padding: 9px 20px;
   font-size: 12px;
-  color: #7dd3fc;
+  color: var(--gemini-silver-200);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -463,14 +459,14 @@ input:checked + .gemini-slider:before {
   overflow-y: auto;
   padding-right: 6px;
   user-select: text;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 .gemini-speech-text::-webkit-scrollbar {
   width: 5px;
 }
 .gemini-speech-text::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.2);
   border-radius: 4px;
 }
 
@@ -479,16 +475,16 @@ input:checked + .gemini-slider:before {
   align-items: center;
   justify-content: space-between;
   padding: 11px 20px;
-  background: rgba(0, 0, 0, 0.3);
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.4);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   font-size: 12px;
-  color: var(--gemini-text-muted);
+  color: var(--gemini-silver-400);
 }
 
 .gemini-teleprompter-notes {
   font-style: italic;
   font-size: 11.5px;
-  color: #cbd5e1;
+  color: var(--gemini-silver-300);
 }
 
 .gemini-btn-copy {
@@ -503,7 +499,7 @@ input:checked + .gemini-slider:before {
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2);
   transition: all 0.2s ease;
 }
 
@@ -513,16 +509,16 @@ input:checked + .gemini-slider:before {
 }
 
 /* ==========================================================================
-   Floating Toast Notification (Liquid Glass Pill)
+   Floating Toast Notification (Noir Glass Pill)
    ========================================================================== */
 .gemini-toast {
   position: fixed;
   bottom: 24px;
   right: 24px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.03) 100%),
-              rgba(8, 14, 28, 0.85);
-  backdrop-filter: blur(24px) saturate(200%);
-  -webkit-backdrop-filter: blur(24px) saturate(200%);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.02) 100%),
+              rgba(10, 10, 14, 0.9);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 12px;
   padding: 10px 18px;
@@ -532,7 +528,7 @@ input:checked + .gemini-slider:before {
   display: flex;
   align-items: center;
   gap: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), inset 0 1.5px 1px rgba(255, 255, 255, 0.4);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.8), inset 0 1.5px 1px rgba(255, 255, 255, 0.35);
   transform: translateY(100px);
   opacity: 0;
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
@@ -565,16 +561,16 @@ input:checked + .gemini-slider:before {
 }
 
 .power-btn {
-  color: #10b981;
+  color: #ffffff;
   font-size: 14px;
 }
 
 .power-btn.off {
-  color: #ef4444;
+  color: var(--gemini-silver-600);
 }
 
 /* ==========================================================================
-   LARGE 5-SECOND ANSWER SHOWCASE BANNER (Liquid Emerald Glass)
+   LARGE 5-SECOND ANSWER SHOWCASE BANNER (High-Contrast Monochrome Glass)
    ========================================================================== */
 .gemini-answer-banner {
   display: none;
@@ -583,17 +579,17 @@ input:checked + .gemini-slider:before {
   left: 50%;
   transform: translateX(-50%) translateY(-20px);
   width: min(600px, 92vw);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.02) 100%),
-              rgba(8, 16, 28, 0.92);
-  backdrop-filter: blur(36px) saturate(240%);
-  -webkit-backdrop-filter: blur(36px) saturate(240%);
-  border: 2px solid rgba(16, 185, 129, 0.65);
-  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.01) 100%),
+              rgba(10, 10, 14, 0.95);
+  backdrop-filter: blur(36px);
+  -webkit-backdrop-filter: blur(36px);
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  border-radius: 20px;
   box-shadow: 
-    0 24px 64px -4px rgba(0, 0, 0, 0.85),
-    inset 0 2px 2px rgba(255, 255, 255, 0.55),
-    0 0 40px rgba(16, 185, 129, 0.4);
-  color: #f8fafc;
+    0 24px 64px -4px rgba(0, 0, 0, 0.95),
+    inset 0 2px 2px rgba(255, 255, 255, 0.5),
+    0 0 40px rgba(255, 255, 255, 0.2);
+  color: #ffffff;
   overflow: hidden;
   z-index: 2147483647;
   opacity: 0;
@@ -611,8 +607,8 @@ input:checked + .gemini-slider:before {
   align-items: center;
   justify-content: space-between;
   padding: 11px 20px;
-  background: rgba(16, 185, 129, 0.2);
-  border-bottom: 1px solid rgba(16, 185, 129, 0.4);
+  background: rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
   cursor: grab;
   user-select: none;
 }
@@ -623,7 +619,7 @@ input:checked + .gemini-slider:before {
   gap: 8px;
   font-size: 12px;
   font-weight: 800;
-  color: #34d399;
+  color: #ffffff;
   letter-spacing: 0.8px;
   text-transform: uppercase;
 }
@@ -641,19 +637,19 @@ input:checked + .gemini-slider:before {
   color: #ffffff;
   line-height: 1.35;
   word-break: break-word;
-  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.7);
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.8);
   letter-spacing: 0.2px;
 }
 
 .gemini-answer-sub-text {
   font-size: 15.5px;
-  color: #e2e8f0;
+  color: var(--gemini-silver-200);
   line-height: 1.5;
   word-break: break-word;
 }
 
 .gemini-answer-progress {
-  height: 5px;
+  height: 4px;
   background: rgba(255, 255, 255, 0.12);
   width: 100%;
   overflow: hidden;
@@ -661,8 +657,8 @@ input:checked + .gemini-slider:before {
 
 .gemini-answer-progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, #10b981, #06b6d4);
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+  background: #ffffff;
+  box-shadow: 0 0 10px #ffffff;
   width: 100%;
   transform-origin: left;
 }
