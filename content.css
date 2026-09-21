@@ -1,24 +1,30 @@
-/* content.css - Styling for Gemini Live Assistant Floating HUD & Teleprompter */
+/* ==========================================================================
+   content.css - Luxury Dark Glassmorphism for Gemini Live Assistant HUD
+   ========================================================================== */
 
 :root {
   --gemini-primary: #6366f1;
   --gemini-primary-hover: #4f46e5;
+  --gemini-primary-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%);
+  --gemini-primary-gradient-hover: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #0891b2 100%);
   --gemini-accent: #38bdf8;
   --gemini-success: #10b981;
   --gemini-warning: #f59e0b;
   --gemini-danger: #ef4444;
-  --gemini-bg: rgba(15, 23, 42, 0.94);
-  --gemini-card-bg: rgba(30, 41, 59, 0.85);
-  --gemini-border: rgba(255, 255, 255, 0.12);
+  --gemini-bg: rgba(8, 12, 20, 0.9);
+  --gemini-card-bg: rgba(15, 23, 42, 0.85);
+  --gemini-border: rgba(255, 255, 255, 0.1);
+  --gemini-border-glow: rgba(99, 102, 241, 0.35);
   --gemini-text: #f8fafc;
   --gemini-text-muted: #94a3b8;
   --gemini-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --gemini-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 #gemini-live-host {
   all: initial;
   position: fixed;
-  z-index: 2147483647; /* Maximum z-index to stay above any test page */
+  z-index: 2147483647; /* Highest layer above test pages */
   font-family: var(--gemini-font);
   box-sizing: border-box;
 }
@@ -35,27 +41,34 @@
   font-family: inherit;
 }
 
-/* Floating Control Widget */
+/* ==========================================================================
+   Floating Control Widget
+   ========================================================================== */
 .gemini-widget {
   position: fixed;
   top: 24px;
   right: 24px;
-  width: 320px;
+  width: 324px;
   background: var(--gemini-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--gemini-border);
   border-radius: 16px;
-  box-shadow: 0 12px 36px -4px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.75), inset 0 1px 0 0 rgba(255, 255, 255, 0.1), 0 0 24px -4px rgba(99, 102, 241, 0.2);
   color: var(--gemini-text);
   overflow: hidden;
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
 }
 
+.gemini-widget:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
 .gemini-widget.minimized {
   width: auto;
   border-radius: 9999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 16px rgba(99, 102, 241, 0.25);
 }
 
 .gemini-widget.minimized .gemini-widget-body {
@@ -89,7 +102,7 @@
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.3px;
-  color: #fff;
+  color: #ffffff;
 }
 
 .gemini-sparkle-icon {
@@ -98,6 +111,7 @@
   fill: none;
   stroke: url(#gemini-gradient);
   flex-shrink: 0;
+  filter: drop-shadow(0 0 4px rgba(99, 102, 241, 0.5));
 }
 
 .gemini-header-actions {
@@ -116,12 +130,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s, color 0.15s;
+  transition: all 0.15s ease;
 }
 
 .gemini-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
 }
 
 /* Widget Body */
@@ -137,10 +151,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, 0.4);
   padding: 6px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .gemini-status-indicator {
@@ -162,30 +176,30 @@
 
 .gemini-pulse-dot.working {
   background: var(--gemini-warning);
-  box-shadow: 0 0 8px var(--gemini-warning);
+  box-shadow: 0 0 10px var(--gemini-warning);
   animation: gemini-blink 1s infinite alternate;
 }
 
 .gemini-pulse-dot.error {
   background: var(--gemini-danger);
-  box-shadow: 0 0 8px var(--gemini-danger);
+  box-shadow: 0 0 10px var(--gemini-danger);
 }
 
 @keyframes gemini-blink {
-  from { opacity: 0.4; }
-  to { opacity: 1; }
+  from { opacity: 0.35; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1.15); }
 }
 
 .gemini-question-badge {
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  background: rgba(99, 102, 241, 0.2);
+  background: rgba(99, 102, 241, 0.18);
   color: #a5b4fc;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 4px;
-  border: 1px solid rgba(99, 102, 241, 0.3);
+  border: 1px solid rgba(99, 102, 241, 0.35);
 }
 
 /* Primary Action Buttons */
@@ -202,20 +216,37 @@
   gap: 8px;
   width: 100%;
   padding: 10px 14px;
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 50%, #38bdf8 100%);
+  background: var(--gemini-primary-gradient);
   border: none;
   border-radius: 10px;
   color: #ffffff;
-  font-weight: 600;
+  font-weight: 700;
   font-size: 13px;
   cursor: pointer;
   box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
   transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+  position: relative;
+  overflow: hidden;
+}
+
+.gemini-btn-primary::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  transition: left 0.6s ease;
+}
+
+.gemini-btn-primary:hover::after {
+  left: 100%;
 }
 
 .gemini-btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.55);
 }
 
 .gemini-btn-primary:active {
@@ -241,11 +272,12 @@
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: all 0.15s ease;
 }
 
 .gemini-btn-secondary:hover {
   background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 /* Toggle Switch */
@@ -266,8 +298,8 @@
   position: absolute;
   cursor: pointer;
   inset: 0;
-  background-color: rgba(255, 255, 255, 0.2);
-  transition: 0.2s;
+  background-color: rgba(255, 255, 255, 0.18);
+  transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   border-radius: 34px;
 }
 
@@ -279,12 +311,13 @@
   left: 3px;
   bottom: 3px;
   background-color: white;
-  transition: 0.2s;
+  transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
 input:checked + .gemini-slider {
-  background-color: var(--gemini-primary);
+  background: var(--gemini-primary-gradient);
 }
 
 input:checked + .gemini-slider:before {
@@ -294,7 +327,7 @@ input:checked + .gemini-slider:before {
 /* Result / Explanation Box */
 .gemini-info-box {
   display: none;
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   padding: 8px 10px;
@@ -309,9 +342,9 @@ input:checked + .gemini-slider:before {
   display: block;
 }
 
-/* =========================================================
+/* ==========================================================================
    SPEAKING TELEPROMPTER MODAL / OVERLAY
-========================================================= */
+   ========================================================================== */
 .gemini-teleprompter-overlay {
   display: none;
   position: fixed;
@@ -320,11 +353,11 @@ input:checked + .gemini-slider:before {
   transform: translateX(-50%);
   width: min(640px, 92vw);
   background: var(--gemini-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   border: 1px solid rgba(99, 102, 241, 0.4);
   border-radius: 18px;
-  box-shadow: 0 16px 48px -8px rgba(0, 0, 0, 0.7), 0 0 30px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 20px 50px -8px rgba(0, 0, 0, 0.8), 0 0 32px rgba(99, 102, 241, 0.25);
   color: var(--gemini-text);
   overflow: hidden;
   z-index: 2147483647;
@@ -361,7 +394,7 @@ input:checked + .gemini-slider:before {
   gap: 8px;
   font-size: 14px;
   font-weight: 700;
-  color: #fff;
+  color: #ffffff;
 }
 
 .gemini-teleprompter-badge {
@@ -416,7 +449,7 @@ input:checked + .gemini-slider:before {
   align-items: center;
   justify-content: space-between;
   padding: 10px 18px;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.25);
   border-top: 1px solid var(--gemini-border);
   font-size: 12px;
   color: var(--gemini-text-muted);
@@ -434,35 +467,38 @@ input:checked + .gemini-slider:before {
   gap: 6px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid var(--gemini-border);
-  color: #fff;
+  color: #ffffff;
   padding: 5px 12px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
-  transition: background 0.15s;
+  transition: all 0.15s ease;
 }
 
 .gemini-btn-copy:hover {
   background: rgba(255, 255, 255, 0.16);
 }
 
-/* Floating Toast Notification */
+/* ==========================================================================
+   Floating Toast Notification
+   ========================================================================== */
 .gemini-toast {
   position: fixed;
   bottom: 24px;
   right: 24px;
   background: var(--gemini-bg);
-  backdrop-filter: blur(14px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--gemini-border);
   border-radius: 10px;
   padding: 10px 16px;
-  color: #fff;
+  color: #ffffff;
   font-size: 12.5px;
   font-weight: 500;
   display: flex;
   align-items: center;
   gap: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   transform: translateY(100px);
   opacity: 0;
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
@@ -486,7 +522,7 @@ input:checked + .gemini-slider:before {
   user-select: none !important;
 }
 
-/* Power Off State - Completely Hidden (No Transparency, Zero Residual Visibility) */
+/* Power Off State - Completely Hidden */
 .gemini-widget.power-off {
   display: none !important;
   visibility: hidden !important;
@@ -507,9 +543,9 @@ input:checked + .gemini-slider:before {
   color: #ef4444;
 }
 
-/* =========================================================
+/* ==========================================================================
    LARGE 5-SECOND ANSWER SHOWCASE BANNER
-========================================================= */
+   ========================================================================== */
 .gemini-answer-banner {
   display: none;
   position: fixed;
@@ -517,12 +553,12 @@ input:checked + .gemini-slider:before {
   left: 50%;
   transform: translateX(-50%) translateY(-20px);
   width: min(600px, 92vw);
-  background: rgba(15, 23, 42, 0.97);
+  background: rgba(8, 12, 20, 0.95);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border: 2px solid #10b981;
   border-radius: 16px;
-  box-shadow: 0 16px 48px -4px rgba(0, 0, 0, 0.8), 0 0 32px rgba(16, 185, 129, 0.3);
+  box-shadow: 0 20px 50px -4px rgba(0, 0, 0, 0.85), 0 0 32px rgba(16, 185, 129, 0.35);
   color: #f8fafc;
   overflow: hidden;
   z-index: 2147483647;
@@ -602,7 +638,7 @@ input:checked + .gemini-slider:before {
 
 .gemini-answer-progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, #10b981, #38bdf8);
+  background: linear-gradient(90deg, #10b981, #06b6d4);
   width: 100%;
   transform-origin: left;
 }
