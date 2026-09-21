@@ -1,21 +1,21 @@
 /* ==========================================================================
-   content.css - Luxury Dark Glassmorphism for Gemini Live Assistant HUD
+   content.css - Liquid Glass UI for Gemini Live Assistant HUD & Teleprompter
    ========================================================================== */
 
 :root {
   --gemini-primary: #6366f1;
   --gemini-primary-hover: #4f46e5;
-  --gemini-primary-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%);
-  --gemini-primary-gradient-hover: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #0891b2 100%);
+  --gemini-primary-gradient: linear-gradient(135deg, rgba(99, 102, 241, 0.92) 0%, rgba(139, 92, 246, 0.92) 50%, rgba(6, 182, 212, 0.92) 100%);
+  --gemini-primary-gradient-hover: linear-gradient(135deg, rgba(79, 70, 229, 0.95) 0%, rgba(124, 58, 237, 0.95) 50%, rgba(8, 145, 178, 0.95) 100%);
   --gemini-accent: #38bdf8;
   --gemini-success: #10b981;
   --gemini-warning: #f59e0b;
   --gemini-danger: #ef4444;
-  --gemini-bg: rgba(8, 12, 20, 0.9);
-  --gemini-card-bg: rgba(15, 23, 42, 0.85);
-  --gemini-border: rgba(255, 255, 255, 0.1);
-  --gemini-border-glow: rgba(99, 102, 241, 0.35);
-  --gemini-text: #f8fafc;
+  --gemini-glass-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.02) 100%), rgba(8, 14, 28, 0.82);
+  --gemini-card-bg: rgba(15, 23, 42, 0.75);
+  --gemini-border: rgba(255, 255, 255, 0.22);
+  --gemini-specular: inset 0 1.5px 1.5px 0 rgba(255, 255, 255, 0.45);
+  --gemini-text: #ffffff;
   --gemini-text-muted: #94a3b8;
   --gemini-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --gemini-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -24,7 +24,7 @@
 #gemini-live-host {
   all: initial;
   position: fixed;
-  z-index: 2147483647; /* Highest layer above test pages */
+  z-index: 2147483647;
   font-family: var(--gemini-font);
   box-sizing: border-box;
 }
@@ -42,33 +42,44 @@
 }
 
 /* ==========================================================================
-   Floating Control Widget
+   Floating Control Widget (Liquid Crystal Slab)
    ========================================================================== */
 .gemini-widget {
   position: fixed;
   top: 24px;
   right: 24px;
-  width: 324px;
-  background: var(--gemini-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  width: 328px;
+  background: var(--gemini-glass-bg);
+  backdrop-filter: blur(32px) saturate(220%);
+  -webkit-backdrop-filter: blur(32px) saturate(220%);
   border: 1px solid var(--gemini-border);
-  border-radius: 16px;
-  box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.75), inset 0 1px 0 0 rgba(255, 255, 255, 0.1), 0 0 24px -4px rgba(99, 102, 241, 0.2);
+  border-radius: 22px;
+  box-shadow: 
+    0 24px 60px -8px rgba(0, 0, 0, 0.8),
+    var(--gemini-specular),
+    inset 0 -1.5px 1px 0 rgba(0, 0, 0, 0.35),
+    0 0 30px -4px rgba(99, 102, 241, 0.35);
   color: var(--gemini-text);
   overflow: hidden;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
 }
 
 .gemini-widget:hover {
-  border-color: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.32);
+  box-shadow: 
+    0 28px 70px -8px rgba(0, 0, 0, 0.85),
+    inset 0 2px 2px 0 rgba(255, 255, 255, 0.6),
+    0 0 36px -4px rgba(99, 102, 241, 0.45);
 }
 
 .gemini-widget.minimized {
   width: auto;
   border-radius: 9999px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 16px rgba(99, 102, 241, 0.25);
+  box-shadow: 
+    0 12px 32px rgba(0, 0, 0, 0.7),
+    var(--gemini-specular),
+    0 0 24px rgba(99, 102, 241, 0.35);
 }
 
 .gemini-widget.minimized .gemini-widget-body {
@@ -80,9 +91,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border-bottom: 1px solid var(--gemini-border);
+  padding: 11px 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   cursor: grab;
 }
 
@@ -92,26 +103,26 @@
 
 .gemini-widget.minimized .gemini-widget-header {
   border-bottom: none;
-  padding: 8px 14px;
+  padding: 9px 16px;
 }
 
 .gemini-brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 13.5px;
+  font-weight: 800;
   letter-spacing: 0.3px;
   color: #ffffff;
 }
 
 .gemini-sparkle-icon {
-  width: 18px;
-  height: 18px;
+  width: 19px;
+  height: 19px;
   fill: none;
   stroke: url(#gemini-gradient);
   flex-shrink: 0;
-  filter: drop-shadow(0 0 4px rgba(99, 102, 241, 0.5));
+  filter: drop-shadow(0 0 6px rgba(99, 102, 241, 0.6));
 }
 
 .gemini-header-actions {
@@ -121,92 +132,96 @@
 }
 
 .gemini-icon-btn {
-  background: transparent;
-  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   color: var(--gemini-text-muted);
   cursor: pointer;
-  padding: 4px;
-  border-radius: 6px;
+  padding: 5px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15);
+  transition: all 0.2s ease;
 }
 
 .gemini-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
   color: #ffffff;
 }
 
 /* Widget Body */
 .gemini-widget-body {
-  padding: 14px;
+  padding: 15px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 13px;
 }
 
-/* Status Pill */
+/* Status Bar */
 .gemini-status-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(0, 0, 0, 0.4);
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 .gemini-status-indicator {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   font-size: 11.5px;
-  color: var(--gemini-text-muted);
+  color: #cbd5e1;
 }
 
 .gemini-pulse-dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--gemini-success);
-  box-shadow: 0 0 8px var(--gemini-success);
+  box-shadow: 0 0 10px var(--gemini-success);
   transition: background 0.2s;
 }
 
 .gemini-pulse-dot.working {
   background: var(--gemini-warning);
-  box-shadow: 0 0 10px var(--gemini-warning);
+  box-shadow: 0 0 12px var(--gemini-warning);
   animation: gemini-blink 1s infinite alternate;
 }
 
 .gemini-pulse-dot.error {
   background: var(--gemini-danger);
-  box-shadow: 0 0 10px var(--gemini-danger);
+  box-shadow: 0 0 12px var(--gemini-danger);
 }
 
 @keyframes gemini-blink {
   from { opacity: 0.35; transform: scale(0.85); }
-  to { opacity: 1; transform: scale(1.15); }
+  to { opacity: 1; transform: scale(1.2); }
 }
 
 .gemini-question-badge {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  background: rgba(99, 102, 241, 0.18);
-  color: #a5b4fc;
-  padding: 2px 7px;
-  border-radius: 4px;
-  border: 1px solid rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.22);
+  color: #c7d2fe;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25);
 }
 
-/* Primary Action Buttons */
+/* Primary Action Buttons (Liquid Jelly Capsule) */
 .gemini-button-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
 }
 
 .gemini-btn-primary {
@@ -215,16 +230,20 @@
   justify-content: center;
   gap: 8px;
   width: 100%;
-  padding: 10px 14px;
+  padding: 11px 16px;
   background: var(--gemini-primary-gradient);
-  border: none;
-  border-radius: 10px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 12px;
   color: #ffffff;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 13px;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
-  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+  box-shadow: 
+    0 8px 24px -2px rgba(99, 102, 241, 0.55),
+    inset 0 1.5px 1px rgba(255, 255, 255, 0.6);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
   position: relative;
   overflow: hidden;
 }
@@ -236,8 +255,8 @@
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
-  transition: left 0.6s ease;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+  transition: left 0.7s ease;
 }
 
 .gemini-btn-primary:hover::after {
@@ -245,12 +264,14 @@
 }
 
 .gemini-btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.55);
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: 
+    0 12px 30px -2px rgba(99, 102, 241, 0.7),
+    inset 0 2px 2px rgba(255, 255, 255, 0.75);
 }
 
 .gemini-btn-primary:active {
-  transform: translateY(0);
+  transform: translateY(1px) scale(0.98);
 }
 
 .gemini-btn-primary:disabled {
@@ -264,28 +285,29 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--gemini-border);
-  border-radius: 8px;
-  color: var(--gemini-text);
+  padding: 9px 13px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  color: #ffffff;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15);
+  transition: all 0.2s ease;
 }
 
 .gemini-btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.26);
 }
 
 /* Toggle Switch */
 .gemini-switch {
   position: relative;
   display: inline-block;
-  width: 32px;
-  height: 18px;
+  width: 36px;
+  height: 20px;
 }
 
 .gemini-switch input {
@@ -298,44 +320,52 @@
   position: absolute;
   cursor: pointer;
   inset: 0;
-  background-color: rgba(255, 255, 255, 0.18);
-  transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  background-color: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 34px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+  transition: 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .gemini-slider:before {
   position: absolute;
   content: "";
-  height: 12px;
-  width: 12px;
-  left: 3px;
-  bottom: 3px;
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
   background-color: white;
-  transition: 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   border-radius: 50%;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  transition: 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 input:checked + .gemini-slider {
   background: var(--gemini-primary-gradient);
+  border-color: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.5);
 }
 
 input:checked + .gemini-slider:before {
-  transform: translateX(14px);
+  transform: translateX(16px);
+  box-shadow: 0 0 8px #fff;
 }
 
 /* Result / Explanation Box */
 .gemini-info-box {
   display: none;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 11.5px;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12px;
   line-height: 1.45;
-  color: #cbd5e1;
-  max-height: 90px;
+  color: #e2e8f0;
+  max-height: 95px;
   overflow-y: auto;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 .gemini-info-box.visible {
@@ -343,7 +373,7 @@ input:checked + .gemini-slider:before {
 }
 
 /* ==========================================================================
-   SPEAKING TELEPROMPTER MODAL / OVERLAY
+   SPEAKING TELEPROMPTER MODAL / OVERLAY (Liquid Cinematic Screen)
    ========================================================================== */
 .gemini-teleprompter-overlay {
   display: none;
@@ -352,65 +382,64 @@ input:checked + .gemini-slider:before {
   left: 50%;
   transform: translateX(-50%);
   width: min(640px, 92vw);
-  background: var(--gemini-bg);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(99, 102, 241, 0.4);
-  border-radius: 18px;
-  box-shadow: 0 20px 50px -8px rgba(0, 0, 0, 0.8), 0 0 32px rgba(99, 102, 241, 0.25);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.02) 100%),
+              rgba(8, 14, 28, 0.88);
+  backdrop-filter: blur(36px) saturate(230%);
+  -webkit-backdrop-filter: blur(36px) saturate(230%);
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  border-radius: 22px;
+  box-shadow: 
+    0 24px 64px -8px rgba(0, 0, 0, 0.85),
+    var(--gemini-specular),
+    0 0 40px rgba(99, 102, 241, 0.35);
   color: var(--gemini-text);
   overflow: hidden;
   z-index: 2147483647;
-  animation: gemini-slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: gemini-liquid-slide 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .gemini-teleprompter-overlay.active {
   display: block;
 }
 
-@keyframes gemini-slide-up {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 20px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
+@keyframes gemini-liquid-slide {
+  from { opacity: 0; transform: translate(-50%, 24px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
 }
 
 .gemini-teleprompter-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 18px;
-  background: rgba(255, 255, 255, 0.04);
-  border-bottom: 1px solid var(--gemini-border);
+  padding: 13px 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .gemini-teleprompter-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 14.5px;
+  font-weight: 800;
   color: #ffffff;
 }
 
 .gemini-teleprompter-badge {
   font-size: 11px;
-  font-weight: 600;
-  background: rgba(16, 185, 129, 0.18);
+  font-weight: 700;
+  background: rgba(16, 185, 129, 0.2);
   color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  padding: 2px 8px;
-  border-radius: 9999px;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.3);
 }
 
 .gemini-dropdown-auto-notice {
-  background: rgba(56, 189, 248, 0.12);
-  border-bottom: 1px solid rgba(56, 189, 248, 0.25);
-  padding: 8px 18px;
+  background: rgba(56, 189, 248, 0.14);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 9px 20px;
   font-size: 12px;
   color: #7dd3fc;
   display: flex;
@@ -419,28 +448,29 @@ input:checked + .gemini-slider:before {
 }
 
 .gemini-teleprompter-body {
-  padding: 18px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
 .gemini-speech-text {
-  font-size: 19px;
+  font-size: 19.5px;
   line-height: 1.55;
   font-weight: 500;
-  color: #f1f5f9;
+  color: #ffffff;
   max-height: 220px;
   overflow-y: auto;
   padding-right: 6px;
   user-select: text;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
 .gemini-speech-text::-webkit-scrollbar {
   width: 5px;
 }
 .gemini-speech-text::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.25);
   border-radius: 4px;
 }
 
@@ -448,9 +478,9 @@ input:checked + .gemini-slider:before {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 18px;
-  background: rgba(0, 0, 0, 0.25);
-  border-top: 1px solid var(--gemini-border);
+  padding: 11px 20px;
+  background: rgba(0, 0, 0, 0.3);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
   font-size: 12px;
   color: var(--gemini-text-muted);
 }
@@ -465,43 +495,47 @@ input:checked + .gemini-slider:before {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--gemini-border);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   color: #ffffff;
-  padding: 5px 12px;
-  border-radius: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 12px;
-  transition: all 0.15s ease;
+  font-weight: 600;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25);
+  transition: all 0.2s ease;
 }
 
 .gemini-btn-copy:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 /* ==========================================================================
-   Floating Toast Notification
+   Floating Toast Notification (Liquid Glass Pill)
    ========================================================================== */
 .gemini-toast {
   position: fixed;
   bottom: 24px;
   right: 24px;
-  background: var(--gemini-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--gemini-border);
-  border-radius: 10px;
-  padding: 10px 16px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.03) 100%),
+              rgba(8, 14, 28, 0.85);
+  backdrop-filter: blur(24px) saturate(200%);
+  -webkit-backdrop-filter: blur(24px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 12px;
+  padding: 10px 18px;
   color: #ffffff;
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 600;
   display: flex;
   align-items: center;
   gap: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), inset 0 1.5px 1px rgba(255, 255, 255, 0.4);
   transform: translateY(100px);
   opacity: 0;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 2147483647;
 }
 
@@ -510,7 +544,7 @@ input:checked + .gemini-slider:before {
   opacity: 1;
 }
 
-/* Dragging Optimization (Zero Lag, Instant 1:1 Tracking) */
+/* Dragging Optimization */
 .gemini-widget.gemini-dragging {
   transition: none !important;
   user-select: none !important;
@@ -522,15 +556,11 @@ input:checked + .gemini-slider:before {
   user-select: none !important;
 }
 
-/* Power Off State - Completely Hidden */
+/* Power Off State */
 .gemini-widget.power-off {
   display: none !important;
   visibility: hidden !important;
   opacity: 0 !important;
-  pointer-events: none !important;
-}
-
-.gemini-widget.power-off .gemini-widget-body {
   pointer-events: none !important;
 }
 
@@ -544,7 +574,7 @@ input:checked + .gemini-slider:before {
 }
 
 /* ==========================================================================
-   LARGE 5-SECOND ANSWER SHOWCASE BANNER
+   LARGE 5-SECOND ANSWER SHOWCASE BANNER (Liquid Emerald Glass)
    ========================================================================== */
 .gemini-answer-banner {
   display: none;
@@ -553,12 +583,16 @@ input:checked + .gemini-slider:before {
   left: 50%;
   transform: translateX(-50%) translateY(-20px);
   width: min(600px, 92vw);
-  background: rgba(8, 12, 20, 0.95);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 2px solid #10b981;
-  border-radius: 16px;
-  box-shadow: 0 20px 50px -4px rgba(0, 0, 0, 0.85), 0 0 32px rgba(16, 185, 129, 0.35);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.02) 100%),
+              rgba(8, 16, 28, 0.92);
+  backdrop-filter: blur(36px) saturate(240%);
+  -webkit-backdrop-filter: blur(36px) saturate(240%);
+  border: 2px solid rgba(16, 185, 129, 0.65);
+  border-radius: 22px;
+  box-shadow: 
+    0 24px 64px -4px rgba(0, 0, 0, 0.85),
+    inset 0 2px 2px rgba(255, 255, 255, 0.55),
+    0 0 40px rgba(16, 185, 129, 0.4);
   color: #f8fafc;
   overflow: hidden;
   z-index: 2147483647;
@@ -572,24 +606,13 @@ input:checked + .gemini-slider:before {
   opacity: 1;
 }
 
-.gemini-answer-banner.gemini-dragging {
-  transition: none !important;
-  user-select: none !important;
-  cursor: grabbing !important;
-}
-
-.gemini-answer-banner.gemini-dragging * {
-  cursor: grabbing !important;
-  user-select: none !important;
-}
-
 .gemini-answer-banner-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 18px;
-  background: rgba(16, 185, 129, 0.15);
-  border-bottom: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 11px 20px;
+  background: rgba(16, 185, 129, 0.2);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.4);
   cursor: grab;
   user-select: none;
 }
@@ -598,40 +621,40 @@ input:checked + .gemini-slider:before {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 800;
   color: #34d399;
   letter-spacing: 0.8px;
   text-transform: uppercase;
 }
 
 .gemini-answer-banner-body {
-  padding: 18px 22px;
+  padding: 20px 24px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 11px;
 }
 
 .gemini-answer-main-text {
-  font-size: 22px;
+  font-size: 23px;
   font-weight: 800;
   color: #ffffff;
   line-height: 1.35;
   word-break: break-word;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.7);
   letter-spacing: 0.2px;
 }
 
 .gemini-answer-sub-text {
-  font-size: 15px;
+  font-size: 15.5px;
   color: #e2e8f0;
   line-height: 1.5;
   word-break: break-word;
 }
 
 .gemini-answer-progress {
-  height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  height: 5px;
+  background: rgba(255, 255, 255, 0.12);
   width: 100%;
   overflow: hidden;
 }
@@ -639,6 +662,7 @@ input:checked + .gemini-slider:before {
 .gemini-answer-progress-bar {
   height: 100%;
   background: linear-gradient(90deg, #10b981, #06b6d4);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
   width: 100%;
   transform-origin: left;
 }
@@ -648,10 +672,6 @@ input:checked + .gemini-slider:before {
 }
 
 @keyframes answer-progress-countdown {
-  from {
-    transform: scaleX(1);
-  }
-  to {
-    transform: scaleX(0);
-  }
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
 }
