@@ -8,11 +8,15 @@ const BURNT_KEY = "AQ.Ab8RN6I1C1o7hEEyqfwMJUFw1TdSg-kRieVIS06703505QTCrQ";
 const TRIAL_DURATION_MS = 30 * 60 * 1000; // 30 minutes in milliseconds
 const LIFETIME_PURCHASE_URL = "https://vignesh-fullstackdev-portfolio.vercel.app/";
 
-// Initialize trial timestamp upon first installation
+// Initialize trial remaining seconds upon first installation (1800s = 30min active timer)
+// Timer remains NOT started until API key is added AND first question begins solving!
 chrome.runtime.onInstalled.addListener(async () => {
-  const data = await chrome.storage.local.get(["trialStartedAt", "isLifetimeActive"]);
-  if (!data.trialStartedAt && !data.isLifetimeActive) {
-    await chrome.storage.local.set({ trialStartedAt: Date.now() });
+  const data = await chrome.storage.local.get(["trialRemainingSeconds", "trialStarted", "isLifetimeActive"]);
+  if (data.trialRemainingSeconds === undefined && !data.isLifetimeActive) {
+    await chrome.storage.local.set({
+      trialRemainingSeconds: 1800,
+      trialStarted: false
+    });
   }
 });
 
@@ -29,6 +33,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         purchaseUrl: err.purchaseUrl || LIFETIME_PURCHASE_URL
       }));
     return true; // Keep message channel open for async response
+  }
+
+  if (request.action === "TRIAL_HEARTBEAT") {
+    handleTrialHeartbeat(request.elapsedSeconds || 10)
+      .then((res) => sendResponse({ success: true, ...res }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
   }
 
   if (request.action === "CHECK_MANUAL_PAYMENT_STATUS") {
@@ -184,8 +195,11 @@ async function getOrDetectModel(apiKey) {
 async function handleSolveQuestion(payload) {
   // 1. Verify User Authentication Session
   if (typeof StepAuth !== "undefined") {
-    const session = await StepAuth.getStoredSession();
-    if (!session || !session.access_token) {
+    let session = await StepAuth.getStoredSession();
+    if (session && StepAuth.ensureValidSession) {
+      session = await StepAuth.ensureValidSession();
+    }
+    if (!session || (!session.access_token && !session.user)) {
       const err = new Error("Authentication required. Please click the Step Solver extension icon and sign in.");
       err.code = "AUTH_REQUIRED";
       throw err;
@@ -200,21 +214,14 @@ async function handleSolveQuestion(payload) {
     }
   }
 
-  // 3. Verify 30-Minute Free Trial / Lifetime Subscription
-  const subStatus = await getSubscriptionStatus();
-  if (subStatus.isTrialExpired && !subStatus.isLifetime) {
-    const error = new Error("Your 30-minute free trial has expired. Upgrade to Lifetime Access to continue solving.");
-    error.code = "TRIAL_EXPIRED";
-    error.isTrialExpired = true;
-    error.purchaseUrl = subStatus.purchaseUrl;
-    throw error;
-  }
-
+  // 3. Verify Gemini API Key configuration BEFORE starting trial or calling Gemini
   const settings = await chrome.storage.local.get([
     "geminiApiKeys",
     "activeKeyIndex",
     "geminiApiKey",
-    "geminiModel"
+    "geminiModel",
+    "trialStarted",
+    "trialRemainingSeconds"
   ]);
 
   let keys = Array.isArray(settings.geminiApiKeys) ? [...settings.geminiApiKeys] : [];
@@ -240,6 +247,27 @@ async function handleSolveQuestion(payload) {
   if (keys.length === 0) {
     const error = new Error("Gemini API key is not configured. Please open the extension popup and add your Gemini API key.");
     error.code = "API_KEY_MISSING";
+    throw error;
+  }
+
+  // 4. Start active trial timer upon starting the first question with valid API keys
+  const subStatus = await getSubscriptionStatus();
+  if (!subStatus.isLifetime && !settings.trialStarted) {
+    const remaining = typeof settings.trialRemainingSeconds === "number" ? settings.trialRemainingSeconds : 1800;
+    await chrome.storage.local.set({
+      trialStarted: true,
+      trialRemainingSeconds: remaining
+    });
+    console.info("[Trial] Started 30-minute active usage timer on first question.");
+  }
+
+  // 5. Verify 30-Minute Free Trial / Lifetime Subscription
+  const currentSub = await getSubscriptionStatus();
+  if (currentSub.isTrialExpired && !currentSub.isLifetime) {
+    const error = new Error("Your 30-minute free trial has expired. Upgrade to Lifetime Access to continue solving.");
+    error.code = "TRIAL_EXPIRED";
+    error.isTrialExpired = true;
+    error.purchaseUrl = currentSub.purchaseUrl;
     throw error;
   }
 
@@ -1036,15 +1064,17 @@ async function handleRefreshSingleKey(keyIndex) {
 }
 
 // -------------------------------------------------------------
-// Free Trial (30 Min) & Lifetime Subscription Manager
+// Free Trial (30 Min Active Timer) & Lifetime Subscription Manager
 // -------------------------------------------------------------
 async function getSubscriptionStatus() {
   const data = await chrome.storage.local.get([
     "isLifetimeActive",
-    "trialStartedAt",
+    "trialStarted",
+    "trialRemainingSeconds",
     "licenseKey",
     "lifetimeActivatedAt",
-    "userProfile"
+    "userProfile",
+    "extensionEnabled"
   ]);
 
   // If user profile from Supabase indicates paid
@@ -1056,6 +1086,8 @@ async function getSubscriptionStatus() {
       status: "LIFETIME_ACTIVE",
       isLifetime: true,
       isTrialExpired: false,
+      trialStarted: true,
+      isPaused: false,
       remainingMs: Infinity,
       remainingMinutes: Infinity,
       remainingSeconds: Infinity,
@@ -1076,6 +1108,8 @@ async function getSubscriptionStatus() {
       status: "LIFETIME_ACTIVE",
       isLifetime: true,
       isTrialExpired: false,
+      trialStarted: true,
+      isPaused: false,
       remainingMs: Infinity,
       remainingMinutes: Infinity,
       remainingSeconds: Infinity,
@@ -1083,45 +1117,76 @@ async function getSubscriptionStatus() {
     };
   }
 
-  const now = Date.now();
-  let trialStartedAt = data.trialStartedAt;
+  // Free Trial calculation based on Active Usable Seconds (30 minutes = 1800s total)
+  const isExtensionEnabled = data.extensionEnabled !== false;
+  const trialStarted = data.trialStarted === true;
+  let remainingSeconds = typeof data.trialRemainingSeconds === "number" ? data.trialRemainingSeconds : 1800;
 
-  // Purge any ancient install timestamp (e.g. older than 24h if not backed by active cloud profile)
-  if (trialStartedAt && typeof trialStartedAt === "number" && (now - trialStartedAt > 24 * 3600 * 1000) && (!data.userProfile || !data.userProfile.trial_started_at)) {
-    await chrome.storage.local.remove(["trialStartedAt"]);
-    trialStartedAt = null;
-  }
+  // Never let remainingSeconds exceed 1800
+  if (remainingSeconds > 1800) remainingSeconds = 1800;
 
-  // If server profile has trial_started_at, prioritize server timestamp
-  if (data.userProfile && data.userProfile.trial_started_at) {
-    const serverMs = new Date(data.userProfile.trial_started_at).getTime();
-    if (!isNaN(serverMs)) {
-      trialStartedAt = serverMs;
-    }
-  }
-
-  // Initialize trial timestamp on first query if not present
-  if (!trialStartedAt || typeof trialStartedAt !== "number") {
-    trialStartedAt = now;
-    await chrome.storage.local.set({ trialStartedAt });
-  }
-
-  const elapsedMs = now - trialStartedAt;
-  const remainingMs = Math.max(0, TRIAL_DURATION_MS - elapsedMs);
-  const remainingMinutes = Math.ceil(remainingMs / 60000);
-  const remainingSeconds = Math.ceil(remainingMs / 1000);
-  const isTrialExpired = remainingMs <= 0;
+  const isTrialExpired = trialStarted && remainingSeconds <= 0;
+  const remainingMs = Math.max(0, remainingSeconds * 1000);
+  const remainingMinutes = Math.ceil(remainingSeconds / 60);
 
   return {
-    status: isTrialExpired ? "TRIAL_EXPIRED" : "TRIAL_ACTIVE",
+    status: isTrialExpired ? "TRIAL_EXPIRED" : (trialStarted ? "TRIAL_ACTIVE" : "TRIAL_NOT_STARTED"),
     isLifetime: false,
+    trialStarted,
+    isPaused: !isExtensionEnabled,
     isTrialExpired,
-    trialStartedAt,
-    elapsedMs,
-    remainingMs,
-    remainingMinutes,
     remainingSeconds,
+    remainingMinutes,
+    remainingMs,
     purchaseUrl: LIFETIME_PURCHASE_URL
+  };
+}
+
+// Active Usage Heartbeat: Ticks down trial seconds ONLY while extension is ON and question solving is active
+async function handleTrialHeartbeat(elapsedSeconds = 1) {
+  const data = await chrome.storage.local.get([
+    "isLifetimeActive",
+    "trialStarted",
+    "trialRemainingSeconds",
+    "extensionEnabled"
+  ]);
+
+  if (data.isLifetimeActive) {
+    return { isLifetime: true, remainingSeconds: Infinity, isPaused: false };
+  }
+
+  // If extension is turned OFF, timer is PAUSED
+  if (data.extensionEnabled === false) {
+    return {
+      isLifetime: false,
+      trialStarted: !!data.trialStarted,
+      isPaused: true,
+      remainingSeconds: data.trialRemainingSeconds !== undefined ? data.trialRemainingSeconds : 1800
+    };
+  }
+
+  // If trial has not yet started (no API key / first question not yet started), DO NOT decrement
+  if (!data.trialStarted) {
+    return {
+      isLifetime: false,
+      trialStarted: false,
+      isPaused: false,
+      remainingSeconds: 1800
+    };
+  }
+
+  const currentSeconds = typeof data.trialRemainingSeconds === "number" ? data.trialRemainingSeconds : 1800;
+  const decrement = Math.max(1, Math.min(60, Number(elapsedSeconds) || 1));
+  const newRemaining = Math.max(0, currentSeconds - decrement);
+
+  await chrome.storage.local.set({ trialRemainingSeconds: newRemaining });
+
+  return {
+    isLifetime: false,
+    trialStarted: true,
+    isPaused: false,
+    remainingSeconds: newRemaining,
+    isTrialExpired: newRemaining <= 0
   };
 }
 

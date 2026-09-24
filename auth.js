@@ -70,6 +70,11 @@ async function authSignUp(email, password, fullName = "") {
   if (!email || !password) throw new Error("Email and password are required.");
   if (password.length < 6) throw new Error("Password must be at least 6 characters.");
 
+  // Character filtering: Disallow < > and HTML/script injection tags
+  if (/[<>]/.test(email) || /[<>]/.test(password) || /[<>]/.test(fullName)) {
+    throw new Error("Invalid characters (<>) detected. Please use alphanumeric characters and standard punctuation.");
+  }
+
   const cleanEmail = email.trim().toLowerCase();
   const cleanName = (fullName || "").trim() || cleanEmail.split("@")[0];
   const deviceId = await getOrCreateDeviceId();
@@ -89,7 +94,7 @@ async function authSignUp(email, password, fullName = "") {
 
   const userId = data.id || data.user?.id;
 
-  // 2. Ensure profile row exists in public.profiles table with device & trial info
+  // 2. Ensure profile row exists in public.profiles table with device info
   if (userId) {
     try {
       await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles`, {
@@ -105,7 +110,6 @@ async function authSignUp(email, password, fullName = "") {
           email: cleanEmail,
           full_name: cleanName,
           payment_status: "unpaid",
-          trial_started_at: nowIso,
           current_device_id: deviceId,
           last_device_name: deviceName,
           last_active_at: nowIso
@@ -122,15 +126,19 @@ async function authSignUp(email, password, fullName = "") {
       console.warn("[Auth] Device session initialization notice:", err.message);
     }
 
-    // 4. Initialize fresh local 30-minute trial and user profile in storage
+    // 4. Initialize trial remaining seconds (1800s = 30min), keeping trialStarted = false until 1st question
+    const storedTrial = await chrome.storage.local.get(["trialStarted", "trialRemainingSeconds"]);
+    const trialStarted = storedTrial.trialStarted === true;
+    const trialRemainingSeconds = typeof storedTrial.trialRemainingSeconds === "number" ? storedTrial.trialRemainingSeconds : 1800;
+
     await chrome.storage.local.set({
-      trialStartedAt: Date.now(),
+      trialStarted,
+      trialRemainingSeconds,
       userProfile: {
         id: userId,
         email: cleanEmail,
         full_name: cleanName,
         payment_status: "unpaid",
-        trial_started_at: nowIso,
         current_device_id: deviceId,
         last_device_name: deviceName
       }
@@ -148,6 +156,11 @@ async function authSignUp(email, password, fullName = "") {
 
 async function authSignIn(email, password) {
   if (!email || !password) throw new Error("Please enter your email and password.");
+
+  // Character filtering: Disallow < > and HTML/script injection tags
+  if (/[<>]/.test(email) || /[<>]/.test(password)) {
+    throw new Error("Invalid characters (<>) detected. Please use alphanumeric characters and standard punctuation.");
+  }
 
   const cleanEmail = email.trim().toLowerCase();
   const payload = {
@@ -217,24 +230,25 @@ async function authSignOut() {
     }
   }
 
-  // Clear local session and access flags, but retain extensionDeviceId
+  // Clear local session and access flags, but retain extensionDeviceId and trial state
   await chrome.storage.local.remove([
     "supabaseSession",
     "isLoggedIn",
     "userProfile",
-    "isLifetimeActive",
-    "trialStartedAt"
+    "isLifetimeActive"
   ]);
 
   return { success: true };
 }
 
 async function saveSession(sessionData) {
+  const existing = await chrome.storage.local.get(["supabaseSession"]);
+  const prevUser = existing.supabaseSession?.user || null;
   const session = {
-    access_token: sessionData.access_token,
-    refresh_token: sessionData.refresh_token,
-    expires_at: sessionData.expires_at || (Date.now() / 1000 + (sessionData.expires_in || 3600)),
-    user: sessionData.user
+    access_token: sessionData.access_token || existing.supabaseSession?.access_token,
+    refresh_token: sessionData.refresh_token || existing.supabaseSession?.refresh_token,
+    expires_at: sessionData.expires_at || (Math.floor(Date.now() / 1000) + (sessionData.expires_in || 3600)),
+    user: sessionData.user || prevUser
   };
   await chrome.storage.local.set({
     supabaseSession: session,
@@ -248,24 +262,63 @@ async function getStoredSession() {
   return data.supabaseSession || null;
 }
 
-// Check session validity directly on Supabase server (handles expired tokens and user deletion)
+// Proactively refresh access token before it expires
+async function ensureValidSession() {
+  const session = await getStoredSession();
+  if (!session || !session.access_token) return null;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const isExpiringSoon = session.expires_at && (session.expires_at - nowSec < 300);
+
+  if (isExpiringSoon && session.refresh_token) {
+    try {
+      const refreshRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+        method: "POST",
+        headers: {
+          "apikey": AUTH_CONFIG.supabaseAnonKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ refresh_token: session.refresh_token })
+      });
+
+      if (refreshRes.ok) {
+        const newSession = await refreshRes.json();
+        const mergedUser = newSession.user || session.user;
+        const updated = await saveSession({ ...newSession, user: mergedUser });
+        return updated;
+      }
+    } catch (err) {
+      console.warn("[Auth] Token auto-refresh notice:", err.message);
+    }
+  }
+
+  return session;
+}
+
+// Check session validity directly on Supabase server with offline resilience
 async function validateSessionOnServer(session) {
-  if (!session?.access_token) return null;
+  if (!session || (!session.access_token && !session.user)) return null;
 
   try {
-    const res = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/user`, {
-      headers: {
-        "apikey": AUTH_CONFIG.supabaseAnonKey,
-        "Authorization": `Bearer ${session.access_token}`
-      }
-    });
+    if (session.access_token) {
+      const res = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/user`, {
+        headers: {
+          "apikey": AUTH_CONFIG.supabaseAnonKey,
+          "Authorization": `Bearer ${session.access_token}`
+        }
+      });
 
-    if (res.ok) {
-      const user = await res.json();
-      return user;
+      if (res.ok) {
+        const user = await res.json();
+        if (user && user.id) {
+          session.user = user;
+          await chrome.storage.local.set({ supabaseSession: session });
+          return user;
+        }
+      }
     }
 
-    // If access token expired, attempt automatic refresh
+    // If access token expired or returned 401, attempt automatic refresh
     if (session.refresh_token) {
       const refreshRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
         method: "POST",
@@ -278,14 +331,23 @@ async function validateSessionOnServer(session) {
 
       if (refreshRes.ok) {
         const newSession = await refreshRes.json();
-        await saveSession(newSession);
-        return newSession.user;
+        const mergedUser = newSession.user || session.user;
+        await saveSession({ ...newSession, user: mergedUser });
+        return mergedUser;
       }
+    }
+
+    // Resilient fallback: If user was previously authenticated and session user exists,
+    // keep user signed in rather than forcing repeated login on restart or temporary network glitch
+    if (session.user && session.user.id) {
+      console.info("[Auth] Preserving stored authenticated session across restart/refresh.");
+      return session.user;
     }
 
     return null;
   } catch (err) {
-    console.warn("[Auth] validateSessionOnServer warning:", err.message);
+    console.warn("[Auth] validateSessionOnServer network warning:", err.message);
+    // Offline resilience: never wipe session on network glitch or restart
     return session.user || null;
   }
 }
@@ -342,46 +404,35 @@ async function syncUserProfile(session) {
     "Content-Type": "application/json"
   };
 
-  // 2. Sync Trial Start Timestamp (Server authoritative)
-  if (profile.trial_started_at) {
-    let serverTrialMs = new Date(profile.trial_started_at).getTime();
-    const trialDurationMs = 30 * 60 * 1000;
-    const isOverdue = (Date.now() - serverTrialMs) > trialDurationMs;
-    const isFirstTimeSession = profile.last_active_at === profile.created_at || !profile.current_device_id;
+  // 2. Sync Active Trial Seconds and Started State (NEVER reset to 1800 on refresh!)
+  const stored = await chrome.storage.local.get(["trialStarted", "trialRemainingSeconds"]);
+  let trialStarted = stored.trialStarted === true;
+  let trialRemainingSeconds = typeof stored.trialRemainingSeconds === "number" ? stored.trialRemainingSeconds : 1800;
 
-    // If trial expired before user could even complete initial login/verification, grant fresh 30 min
-    if (isOverdue && isFirstTimeSession && profile.payment_status !== "paid") {
-      const nowIso = new Date().toISOString();
-      serverTrialMs = Date.now();
-      profile.trial_started_at = nowIso;
-      profile.last_active_at = nowIso;
-
-      fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
-        method: "PATCH",
-        headers: authHeaders,
-        body: JSON.stringify({ trial_started_at: nowIso, last_active_at: nowIso })
-      }).catch(() => {});
-    }
-
-    if (!isNaN(serverTrialMs)) {
-      await chrome.storage.local.set({ trialStartedAt: serverTrialMs });
-    }
-  } else {
-    // If not set on server, initialize fresh trial now
-    const trialMs = Date.now();
-    const isoDate = new Date(trialMs).toISOString();
-    profile.trial_started_at = isoDate;
-    await chrome.storage.local.set({ trialStartedAt: trialMs });
-
-    // Update server profile with trial start date
-    fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
-      method: "PATCH",
-      headers: authHeaders,
-      body: JSON.stringify({ trial_started_at: isoDate, last_active_at: isoDate })
-    }).catch(() => {});
+  // If server profile has trial_started, honor it
+  if (profile.trial_started) {
+    trialStarted = true;
+  }
+  if (typeof profile.trial_remaining_seconds === "number" && stored.trialRemainingSeconds === undefined) {
+    trialRemainingSeconds = profile.trial_remaining_seconds;
   }
 
-  await chrome.storage.local.set({ userProfile: profile });
+  await chrome.storage.local.set({
+    trialStarted,
+    trialRemainingSeconds,
+    userProfile: profile
+  });
+
+  // Sync to server asynchronously without blocking
+  fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
+    method: "PATCH",
+    headers: authHeaders,
+    body: JSON.stringify({
+      last_active_at: new Date().toISOString(),
+      ...(trialStarted ? { trial_started: true, trial_remaining_seconds: trialRemainingSeconds } : {})
+    })
+  }).catch(() => {});
+
   return profile;
 }
 
@@ -547,6 +598,7 @@ const stepAuthExport = {
   authSignOut,
   saveSession,
   getStoredSession,
+  ensureValidSession,
   validateSessionOnServer,
   getUserProfile,
   syncUserProfile,

@@ -100,43 +100,49 @@ document.addEventListener("DOMContentLoaded", async () => {
   // -------------------------------------------------------------
   async function checkAuthAndDeviceState() {
     try {
-      const session = await StepAuth.getStoredSession();
-      if (!session || !session.access_token) {
+      let session = await StepAuth.getStoredSession();
+      if (!session || (!session.access_token && !session.user)) {
         switchView("auth");
         updateHeaderStatus("Auth Required", "disconnected");
         return;
       }
 
-      // Check session validity directly on Supabase server
+      // Ensure access token is refreshed proactively if near expiry
+      if (StepAuth.ensureValidSession) {
+        session = (await StepAuth.ensureValidSession()) || session;
+      }
+
+      // Check session validity directly on Supabase server with offline fallback
       const authUser = await StepAuth.validateSessionOnServer(session);
-      if (!authUser) {
+      const activeUser = authUser || session.user;
+      if (!activeUser) {
         switchView("auth");
         updateHeaderStatus("Auth Required", "disconnected");
         return;
       }
 
       // Check user email confirmation status
-      if (authUser.email_confirmed_at === null && !authUser.confirmed_at) {
+      if (activeUser.email_confirmed_at === null && !activeUser.confirmed_at) {
         switchView("verify");
-        if (verifyEmailDisplay) verifyEmailDisplay.innerText = authUser.email || session.user?.email || "";
+        if (verifyEmailDisplay) verifyEmailDisplay.innerText = activeUser.email || session.user?.email || "";
         updateHeaderStatus("Verify Email", "disconnected");
         return;
       }
 
-      const userEmail = authUser.email || session.user?.email || "";
+      const userEmail = activeUser.email || session.user?.email || "";
       if (userEmailDisplay) userEmailDisplay.innerText = userEmail;
       if (verifyEmailDisplay) verifyEmailDisplay.innerText = userEmail;
 
       // Live Single-Device Concurrency Verification from Supabase Database
-      const concurrency = await StepAuth.verifyDeviceConcurrency();
+      const concurrency = await StepAuth.verifyDeviceConcurrency().catch(() => ({ isAuthenticated: true, isDeviceActive: true }));
 
-      if (!concurrency.isAuthenticated) {
+      if (concurrency && concurrency.isAuthenticated === false) {
         switchView("auth");
         updateHeaderStatus("Auth Required", "disconnected");
         return;
       }
 
-      if (concurrency.isDeviceActive === false) {
+      if (concurrency && concurrency.isDeviceActive === false) {
         switchView("conflict");
         if (conflictFeedback) {
           const otherDevice = concurrency.conflictDeviceName || "another machine";
@@ -152,16 +158,24 @@ document.addEventListener("DOMContentLoaded", async () => {
       switchView("main");
       updateHeaderStatus("Ready", "connected");
 
-      // 1. Sync authoritative cloud user profile from Supabase (payment_status, trial_started_at)
-      await StepAuth.syncUserProfile(session);
+      // 1. Sync authoritative cloud user profile from Supabase in the background
+      StepAuth.syncUserProfile(session).catch(() => {});
 
       // 2. Check and update subscription & trial status
       await updateSubscriptionUI();
 
     } catch (err) {
       console.warn("[Popup] Auth check error:", err);
-      switchView("auth");
-      updateHeaderStatus("Error", "disconnected");
+      // Resilient check: If local storage has valid session user, stay in main view
+      const local = await chrome.storage.local.get(["supabaseSession", "isLoggedIn"]);
+      if (local.isLoggedIn && local.supabaseSession?.user) {
+        switchView("main");
+        updateHeaderStatus("Ready", "connected");
+        await updateSubscriptionUI();
+      } else {
+        switchView("auth");
+        updateHeaderStatus("Auth Required", "disconnected");
+      }
     }
   }
 
@@ -207,12 +221,29 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // Disallow < > and script characters on inputs
+  [authEmailInput, authPasswordInput, authNameInput, manualPaymentUtr].forEach((inputEl) => {
+    if (inputEl) {
+      inputEl.addEventListener("input", (e) => {
+        if (/[<>]/.test(e.target.value)) {
+          e.target.value = e.target.value.replace(/[<>]/g, "");
+        }
+      });
+    }
+  });
+
   if (authForm) {
     authForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const email = (authEmailInput?.value || "").trim();
       const password = (authPasswordInput?.value || "").trim();
       const fullName = (authNameInput?.value || "").trim();
+
+      // Block <> script/HTML tags
+      if (/[<>]/.test(email) || /[<>]/.test(password) || /[<>]/.test(fullName)) {
+        showAuthFeedback("Invalid characters (<>). Only standard characters and punctuation allowed.", "error");
+        return;
+      }
 
       if (!email || !password) {
         showAuthFeedback("Please provide both email and password.", "error");
@@ -439,15 +470,26 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
-      // Case 3: Free Trial Active (< 30 Minutes)
+      // Case 3: Free Trial (< 30 Minutes)
       if (trialActiveView) trialActiveView.style.display = "flex";
       if (trialExpiredView) trialExpiredView.style.display = "none";
       if (lifetimeActiveView) lifetimeActiveView.style.display = "none";
 
-      let remainingMs = response.remainingMs || 0;
+      let remainingSec = typeof response.remainingSeconds === "number" ? response.remainingSeconds : 1800;
+      const trialStarted = response.trialStarted === true;
+      const isPaused = response.isPaused === true;
 
       function renderCountdown() {
-        if (remainingMs <= 0) {
+        if (!trialStarted) {
+          if (trialTimeBadge) {
+            trialTimeBadge.innerText = "30m Left";
+            trialTimeBadge.title = "Timer starts when you solve your first question";
+            trialTimeBadge.classList.remove("urgent");
+          }
+          return;
+        }
+
+        if (remainingSec <= 0) {
           if (trialActiveView) trialActiveView.style.display = "none";
           if (trialExpiredView) trialExpiredView.style.display = "flex";
           if (qrPaymentSection) qrPaymentSection.style.display = "flex";
@@ -455,25 +497,36 @@ document.addEventListener("DOMContentLoaded", async () => {
           return;
         }
 
-        const totalSeconds = Math.floor(remainingMs / 1000);
-        const mins = Math.floor(totalSeconds / 60);
-        const secs = totalSeconds % 60;
+        const mins = Math.floor(remainingSec / 60);
+        const secs = remainingSec % 60;
 
         if (trialTimeBadge) {
-          trialTimeBadge.innerText = mins > 0 ? `${mins}m ${secs}s Left` : `${secs}s Left`;
-          if (mins < 5) {
-            trialTimeBadge.classList.add("urgent");
-          } else {
+          if (isPaused) {
+            trialTimeBadge.innerText = mins > 0 ? `${mins}m ${secs}s (Paused)` : `${secs}s (Paused)`;
             trialTimeBadge.classList.remove("urgent");
+          } else {
+            trialTimeBadge.innerText = mins > 0 ? `${mins}m ${secs}s Left` : `${secs}s Left`;
+            if (mins < 5) {
+              trialTimeBadge.classList.add("urgent");
+            } else {
+              trialTimeBadge.classList.remove("urgent");
+            }
           }
         }
       }
 
       renderCountdown();
-      countdownInterval = setInterval(() => {
-        remainingMs -= 1000;
-        renderCountdown();
-      }, 1000);
+
+      // Only tick interval if trial is started AND extension is NOT paused
+      if (trialStarted && !isPaused && remainingSec > 0) {
+        countdownInterval = setInterval(async () => {
+          remainingSec -= 1;
+          renderCountdown();
+          if (remainingSec % 5 === 0 || remainingSec <= 0) {
+            await chrome.storage.local.set({ trialRemainingSeconds: Math.max(0, remainingSec) });
+          }
+        }, 1000);
+      }
 
     } catch (err) {
       console.warn("[Step Solver] Subscription UI query error:", err);
@@ -667,6 +720,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           }).catch(() => {});
         });
       });
+      updateSubscriptionUI();
     });
   }
 
@@ -1202,7 +1256,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         activeIndex = changes.activeKeyIndex.newValue || 0;
         shouldRerender = true;
       }
-      if (changes.isLifetimeActive || changes.trialStartedAt) {
+      if (changes.isLifetimeActive || changes.trialRemainingSeconds || changes.trialStarted || changes.extensionEnabled) {
         updateSubscriptionUI();
       }
       if (shouldRerender) {

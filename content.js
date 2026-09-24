@@ -34,10 +34,101 @@
   const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
   // -------------------------------------------------------------
+  // Login Page Detector & Character Sanitization Filter
+  // -------------------------------------------------------------
+  function isLoginPage() {
+    const path = (window.location.pathname || "").toLowerCase();
+    const hash = (window.location.hash || "").toLowerCase();
+    const href = (window.location.href || "").toLowerCase();
+
+    // 1. URL pattern check for login / authentication pages
+    if (
+      path.includes("/login") ||
+      path.includes("/signin") ||
+      path.includes("/sign_in") ||
+      path.includes("/users/sign_in") ||
+      hash.includes("login") ||
+      hash.includes("signin") ||
+      href.includes("step_login")
+    ) {
+      return true;
+    }
+
+    // 2. DOM inspection for credential/login fields
+    const hasPassword = document.querySelector('input[type="password"]') !== null;
+    const hasLoginForm = document.querySelector('form[action*="login" i], form[action*="sign_in" i], #login-form, .login-form, form#signin-form') !== null;
+    const hasLoginBtn = document.querySelector('button[type="submit"][id*="login" i], input[type="submit"][value*="Login" i], button#btnLogin, .btn-login') !== null;
+
+    if (hasPassword || (hasLoginForm && hasLoginBtn)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // Filter out < > and script tags, strictly permitting alphanumeric and standard sentence punctuation
+  function sanitizeInputText(text) {
+    if (typeof text !== "string") return "";
+    let clean = text.replace(/[<>]/g, "");
+    clean = clean.replace(/[^a-zA-Z0-9\s.,"'!?\-:;()]/g, "");
+    return clean;
+  }
+
+  // Watch for single-page app transition from login page to test assessment page
+  let loginTransitionObserver = null;
+  function setupLoginPageTransitionWatcher() {
+    if (loginTransitionObserver) return;
+
+    const checkTransition = () => {
+      if (!isLoginPage()) {
+        if (loginTransitionObserver) {
+          loginTransitionObserver.disconnect();
+          loginTransitionObserver = null;
+        }
+        window.removeEventListener("popstate", checkTransition);
+        window.removeEventListener("hashchange", checkTransition);
+        console.log("[Step Solver] Navigated out of login page. Booting solver HUD.");
+        initHUD();
+      }
+    };
+
+    window.addEventListener("popstate", checkTransition);
+    window.addEventListener("hashchange", checkTransition);
+
+    loginTransitionObserver = new MutationObserver(() => {
+      checkTransition();
+    });
+    loginTransitionObserver.observe(document.body || document.documentElement, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  // Active Usage Heartbeat: Ticks down trial seconds only when extension is active and solving
+  let trialHeartbeatTimer = null;
+  function ensureTrialHeartbeat() {
+    if (trialHeartbeatTimer) return;
+    trialHeartbeatTimer = setInterval(() => {
+      if (!state.isEnabled || isLoginPage()) return;
+      chrome.runtime.sendMessage({ action: "TRIAL_HEARTBEAT", elapsedSeconds: 10 }).catch(() => {});
+    }, 10000);
+  }
+
+  // -------------------------------------------------------------
   // 1. UI Initialization: Floating Widget & Teleprompter
   // -------------------------------------------------------------
   async function initHUD() {
+    // Security Guard: Completely bypass execution on login pages
+    if (isLoginPage()) {
+      console.log("[Step Solver] Login page detected. Script injection and solver kept dormant.");
+      setupLoginPageTransitionWatcher();
+      return;
+    }
+
     if (document.getElementById("gemini-live-host")) return;
+
+    // Start active usage heartbeat
+    ensureTrialHeartbeat();
 
     // Load enabled state, pacing, answer popup, and automation settings from storage
     const stored = await chrome.storage.local.get([
@@ -542,7 +633,7 @@
   }
 
   function findActiveQuestionContainer() {
-    if (isAnswerOrFeedbackPage()) return null;
+    if (isLoginPage() || isAnswerOrFeedbackPage()) return null;
     const meta = getCurrentQuestionMeta();
     const currentNum = meta.currentNum;
 
@@ -1705,6 +1796,16 @@
 
   function setElementValue(element, val) {
     if (!element) return;
+
+    // Security guard: Never enter or touch any inputs on login pages or password fields
+    if (isLoginPage() || element.type === "password" || element.name?.toLowerCase().includes("password")) {
+      console.warn("[Step Solver] Skipped input on protected/login field");
+      return;
+    }
+
+    // Character filtering: Disallow < > and script tags, strictly permitting alphanumeric and punctuation
+    const cleanVal = sanitizeInputText(val);
+
     element.focus();
 
     // 1. Try modern execCommand to trigger React / Angular / TinyMCE / Quill internal state
@@ -1712,7 +1813,7 @@
     try {
       if (document.queryCommandSupported && document.queryCommandSupported("insertText")) {
         document.execCommand("selectAll", false, null);
-        execSuccess = document.execCommand("insertText", false, val);
+        execSuccess = document.execCommand("insertText", false, cleanVal);
       }
     } catch (_) {}
 
@@ -1722,19 +1823,19 @@
       const nativeSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
 
       if (nativeSetter) {
-        nativeSetter.call(element, val);
+        nativeSetter.call(element, cleanVal);
       } else {
-        element.value = val;
+        element.value = cleanVal;
       }
     } else if (element.isContentEditable || element.getAttribute("role") === "textbox") {
-      if (!execSuccess || element.innerText.trim() !== val.trim()) {
-        element.innerText = val;
+      if (!execSuccess || element.innerText.trim() !== cleanVal.trim()) {
+        element.innerText = cleanVal;
       }
     }
 
     // 3. Dispatch comprehensive event chain to notify all frameworks
     try {
-      element.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: val }));
+      element.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: cleanVal }));
     } catch (_) {}
     element.dispatchEvent(new Event("input", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
@@ -2570,7 +2671,7 @@
   }
 
   async function handleAutoNext() {
-    if (!state.autoSubmitEnabled || isAutoNextClicking) return;
+    if (!state.autoSubmitEnabled || isAutoNextClicking || isLoginPage()) return;
     if (autoNextTimer) return;
 
     // Provide immediate visual status: waiting 2 seconds before clicking Next
@@ -2579,7 +2680,7 @@
 
     autoNextTimer = setTimeout(async () => {
       autoNextTimer = null;
-      if (!state.autoSubmitEnabled || isAutoNextClicking) return;
+      if (!state.autoSubmitEnabled || isAutoNextClicking || isLoginPage()) return;
       if (!isAnswerOrFeedbackPage()) return;
 
       const nextBtn = findActionElement("next");
@@ -2598,7 +2699,7 @@
   }
 
   async function handleAutoSubmit() {
-    if (!state.autoSubmitEnabled) return;
+    if (!state.autoSubmitEnabled || isLoginPage()) return;
 
     // Never submit on Answer or Feedback page!
     if (isAnswerOrFeedbackPage()) {
@@ -2815,7 +2916,7 @@
   // 5. Main Trigger Controller (Token-Saver Guarded)
   // -------------------------------------------------------------
   async function triggerSolve(isAutomated = false) {
-    if (!state.isEnabled) return;
+    if (!state.isEnabled || isLoginPage()) return;
 
     try {
       // If currently on question page, check if video needs auto-playing
