@@ -1042,6 +1042,7 @@ async function getSubscriptionStatus() {
   const data = await chrome.storage.local.get([
     "isLifetimeActive",
     "trialStartedAt",
+    "deviceTrialStartedAt",
     "licenseKey",
     "lifetimeActivatedAt",
     "userProfile"
@@ -1084,13 +1085,7 @@ async function getSubscriptionStatus() {
   }
 
   const now = Date.now();
-  let trialStartedAt = data.trialStartedAt;
-
-  // Purge any ancient install timestamp (e.g. older than 24h if not backed by active cloud profile)
-  if (trialStartedAt && typeof trialStartedAt === "number" && (now - trialStartedAt > 24 * 3600 * 1000) && (!data.userProfile || !data.userProfile.trial_started_at)) {
-    await chrome.storage.local.remove(["trialStartedAt"]);
-    trialStartedAt = null;
-  }
+  let trialStartedAt = data.trialStartedAt || data.deviceTrialStartedAt;
 
   // If server profile has trial_started_at, prioritize server timestamp
   if (data.userProfile && data.userProfile.trial_started_at) {
@@ -1103,7 +1098,7 @@ async function getSubscriptionStatus() {
   // Initialize trial timestamp on first query if not present
   if (!trialStartedAt || typeof trialStartedAt !== "number") {
     trialStartedAt = now;
-    await chrome.storage.local.set({ trialStartedAt });
+    await chrome.storage.local.set({ trialStartedAt, deviceTrialStartedAt: now });
   }
 
   const elapsedMs = now - trialStartedAt;

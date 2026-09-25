@@ -3,9 +3,9 @@ const AUTH_CONFIG = {
   supabaseAnonKey: "sb_publishable_hXGTeGYid688TSuSDF6Mww_A8LIc4hF",
   supabaseSecretKey: "sb_publishable_hXGTeGYid688TSuSDF6Mww_A8LIc4hF",
   supportEmail: "support.vickydevsolutions@gmail.com",
-  upiId: "vicky636501@oksbi",
+  upiId: "vicky636501@okaxis",
   upiName: "Vicky",
-  paymentAmountInr: 50
+  paymentAmountInr: 20
 };
 
 // -------------------------------------------------------------
@@ -76,14 +76,15 @@ async function authSignUp(email, password, fullName = "") {
   const deviceName = getDeviceFriendlyName();
   const nowIso = new Date().toISOString();
 
-  // 1. Standard Supabase Sign Up
-  // Supabase automatically dispatches the verification email through your configured Google Gmail SMTP!
-  const data = await supabaseRequest("/auth/v1/signup", {
+  // 1. Standard Supabase Sign Up with direct verification redirect
+  const redirectTarget = "https://english.steptest.in/?email_verified=true";
+  const data = await supabaseRequest(`/auth/v1/signup?redirect_to=${encodeURIComponent(redirectTarget)}`, {
     method: "POST",
     body: JSON.stringify({
       email: cleanEmail,
       password: password,
-      data: { full_name: cleanName }
+      data: { full_name: cleanName },
+      options: { emailRedirectTo: redirectTarget }
     })
   });
 
@@ -91,6 +92,11 @@ async function authSignUp(email, password, fullName = "") {
 
   // 2. Ensure profile row exists in public.profiles table with device & trial info
   if (userId) {
+    // Check if this device already has an active trial timestamp to continue from
+    const local = await chrome.storage.local.get(["trialStartedAt", "deviceTrialStartedAt"]);
+    const activeTrialMs = local.trialStartedAt || local.deviceTrialStartedAt || Date.now();
+    const activeTrialIso = new Date(activeTrialMs).toISOString();
+
     try {
       await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles`, {
         method: "POST",
@@ -105,7 +111,7 @@ async function authSignUp(email, password, fullName = "") {
           email: cleanEmail,
           full_name: cleanName,
           payment_status: "unpaid",
-          trial_started_at: nowIso,
+          trial_started_at: activeTrialIso,
           current_device_id: deviceId,
           last_device_name: deviceName,
           last_active_at: nowIso
@@ -122,15 +128,16 @@ async function authSignUp(email, password, fullName = "") {
       console.warn("[Auth] Device session initialization notice:", err.message);
     }
 
-    // 4. Initialize fresh local 30-minute trial and user profile in storage
+    // 4. Initialize continuous 30-minute trial and user profile in storage
     await chrome.storage.local.set({
-      trialStartedAt: Date.now(),
+      trialStartedAt: activeTrialMs,
+      deviceTrialStartedAt: activeTrialMs,
       userProfile: {
         id: userId,
         email: cleanEmail,
         full_name: cleanName,
         payment_status: "unpaid",
-        trial_started_at: nowIso,
+        trial_started_at: activeTrialIso,
         current_device_id: deviceId,
         last_device_name: deviceName
       }
@@ -217,13 +224,12 @@ async function authSignOut() {
     }
   }
 
-  // Clear local session and access flags, but retain extensionDeviceId
+  // Clear local session and access flags, but retain extensionDeviceId and continuous trial tracking
   await chrome.storage.local.remove([
     "supabaseSession",
     "isLoggedIn",
     "userProfile",
-    "isLifetimeActive",
-    "trialStartedAt"
+    "isLifetimeActive"
   ]);
 
   return { success: true };
@@ -342,42 +348,31 @@ async function syncUserProfile(session) {
     "Content-Type": "application/json"
   };
 
-  // 2. Sync Trial Start Timestamp (Server authoritative)
+  // 2. Sync Trial Start Timestamp (Server authoritative & non-resetting)
   if (profile.trial_started_at) {
-    let serverTrialMs = new Date(profile.trial_started_at).getTime();
-    const trialDurationMs = 30 * 60 * 1000;
-    const isOverdue = (Date.now() - serverTrialMs) > trialDurationMs;
-    const isFirstTimeSession = profile.last_active_at === profile.created_at || !profile.current_device_id;
-
-    // If trial expired before user could even complete initial login/verification, grant fresh 30 min
-    if (isOverdue && isFirstTimeSession && profile.payment_status !== "paid") {
-      const nowIso = new Date().toISOString();
-      serverTrialMs = Date.now();
-      profile.trial_started_at = nowIso;
-      profile.last_active_at = nowIso;
-
-      fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
-        method: "PATCH",
-        headers: authHeaders,
-        body: JSON.stringify({ trial_started_at: nowIso, last_active_at: nowIso })
-      }).catch(() => {});
-    }
-
+    const serverTrialMs = new Date(profile.trial_started_at).getTime();
     if (!isNaN(serverTrialMs)) {
-      await chrome.storage.local.set({ trialStartedAt: serverTrialMs });
+      await chrome.storage.local.set({
+        trialStartedAt: serverTrialMs,
+        deviceTrialStartedAt: serverTrialMs
+      });
     }
   } else {
-    // If not set on server, initialize fresh trial now
-    const trialMs = Date.now();
+    // If not set on server, continue from device trial start if available, or set now
+    const local = await chrome.storage.local.get(["trialStartedAt", "deviceTrialStartedAt"]);
+    const trialMs = local.trialStartedAt || local.deviceTrialStartedAt || Date.now();
     const isoDate = new Date(trialMs).toISOString();
     profile.trial_started_at = isoDate;
-    await chrome.storage.local.set({ trialStartedAt: trialMs });
+    await chrome.storage.local.set({
+      trialStartedAt: trialMs,
+      deviceTrialStartedAt: trialMs
+    });
 
-    // Update server profile with trial start date
+    // Update server profile with initial trial start date
     fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
       method: "PATCH",
       headers: authHeaders,
-      body: JSON.stringify({ trial_started_at: isoDate, last_active_at: isoDate })
+      body: JSON.stringify({ trial_started_at: isoDate, last_active_at: new Date().toISOString() })
     }).catch(() => {});
   }
 

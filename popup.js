@@ -239,7 +239,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           if (err.code === "EMAIL_NOT_CONFIRMED") {
             if (verifyEmailDisplay) verifyEmailDisplay.innerText = email;
             switchView("verify");
-            showVerifyFeedback("Please verify your email address. We sent a link from support.vickydevsolutions@gmail.com.", "info");
+            showVerifyFeedback("check your email", "info");
           } else {
             showAuthFeedback(err.message || "Failed to sign in. Please check credentials.", "error");
           }
@@ -248,12 +248,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
       } else {
         try {
-          showAuthFeedback("Creating account & sending confirmation email...", "info");
+          showAuthFeedback("check your email", "info");
           await StepAuth.authSignUp(email, password, fullName);
           
           if (verifyEmailDisplay) verifyEmailDisplay.innerText = email;
           switchView("verify");
-          showVerifyFeedback("✓ Confirmation email sent! Please check your inbox (or spam) and click the link.", "success");
+          showVerifyFeedback("check your email", "success");
         } catch (err) {
           showAuthFeedback(err.message || "Sign up failed. Please try again.", "error");
         } finally {
@@ -489,7 +489,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       const to = "support.vickydevsolutions@gmail.com";
       const subject = "Step Solver Lifetime Payment Verification";
-      const body = `Hi Vicky,\n\nI have completed the ₹50 UPI payment for Step Solver Lifetime Access.\n\nMy Details:\n- Registered Email: ${userEmail}\n- Device ID: ${deviceId}\n\nPlease find attached my payment screenshot showing the Transaction / UTR ID.\n\nThank you!`;
+      const body = `Hi Vicky,\n\nI have completed the ₹20 UPI payment for Step Solver Lifetime Access.\n\nMy Details:\n- Registered Email: ${userEmail}\n- Device ID: ${deviceId}\n\nPlease find attached my payment screenshot showing the Transaction / UTR ID.\n\nThank you!`;
 
       const gmailComposeUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
@@ -537,7 +537,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!qrPaymentSection) return;
       const isVisible = qrPaymentSection.style.display === "flex";
       qrPaymentSection.style.display = isVisible ? "none" : "flex";
-      btnGetLifetimeTrial.innerText = isVisible ? "⭐ Upgrade to Lifetime Access (₹50)" : "▲ Hide Payment QR Code";
+      btnGetLifetimeTrial.innerText = isVisible ? "⭐ Upgrade to Lifetime Access (₹20)" : "▲ Hide Payment QR Code";
       if (!isVisible) {
         populateQrUserDetails();
         qrPaymentSection.scrollIntoView({ behavior: "smooth" });
@@ -548,7 +548,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Copy UPI ID button
   if (btnCopyUpi) {
     btnCopyUpi.addEventListener("click", () => {
-      const upi = upiIdText ? upiIdText.innerText.trim() : "vicky636501@oksbi";
+      const upi = upiIdText ? upiIdText.innerText.trim() : "vicky636501@okaxis";
       navigator.clipboard.writeText(upi).then(() => {
         const originalText = btnCopyUpi.innerText;
         btnCopyUpi.innerText = "✓ Copied!";
