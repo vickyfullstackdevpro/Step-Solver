@@ -173,10 +173,10 @@
           <div class="master-power-row">
             <div class="master-power-info">
               <span class="master-power-title">Extension Power</span>
-              <span id="master-power-status" class="master-power-status active">Active & Ready</span>
+              <span id="master-power-status" class="master-power-status disabled">Paused</span>
             </div>
             <label class="master-switch">
-              <input type="checkbox" id="master-power-toggle" checked>
+              <input type="checkbox" id="master-power-toggle">
               <span class="master-slider"></span>
             </label>
           </div>
@@ -363,12 +363,12 @@
             <div class="toggle-info">
               <div class="toggle-title-row">
                 <span class="toggle-title">🎯 Answer Popup</span>
-                <span id="answer-popup-badge" class="badge-pill active">ON</span>
+                <span id="answer-popup-badge" class="badge-pill off">OFF</span>
               </div>
               <span class="toggle-desc">Display floating answer showcase HUD on screen</span>
             </div>
             <label class="master-switch">
-              <input type="checkbox" id="toggle-answer-popup" checked>
+              <input type="checkbox" id="toggle-answer-popup">
               <span class="master-slider"></span>
             </label>
           </div>
@@ -393,12 +393,12 @@
             <div class="toggle-info">
               <div class="toggle-title-row">
                 <span class="toggle-title">🎬 Auto-Play Video</span>
-                <span id="auto-play-video-badge" class="badge-pill active">ON</span>
+                <span id="auto-play-video-badge" class="badge-pill off">OFF</span>
               </div>
               <span class="toggle-desc">Plays YouTube & Step HTML5 video once per question set</span>
             </div>
             <label class="master-switch">
-              <input type="checkbox" id="toggle-auto-play-video" checked>
+              <input type="checkbox" id="toggle-auto-play-video">
               <span class="master-slider"></span>
             </label>
           </div>
@@ -408,12 +408,12 @@
             <div class="toggle-info">
               <div class="toggle-title-row">
                 <span class="toggle-title">🛡️ Block Tab-Switching</span>
-                <span id="anti-tab-switch-badge" class="badge-pill active">ON</span>
+                <span id="anti-tab-switch-badge" class="badge-pill off">OFF</span>
               </div>
               <span class="toggle-desc">Prevents website from detecting tab switching or blur</span>
             </div>
             <label class="master-switch">
-              <input type="checkbox" id="toggle-anti-tab-switch" checked>
+              <input type="checkbox" id="toggle-anti-tab-switch">
               <span class="master-slider"></span>
             </label>
           </div>
@@ -423,12 +423,12 @@
             <div class="toggle-info">
               <div class="toggle-title-row">
                 <span class="toggle-title">⏳ Keep Website Active</span>
-                <span id="keep-active-badge" class="badge-pill active">ON</span>
+                <span id="keep-active-badge" class="badge-pill off">OFF</span>
               </div>
               <span class="toggle-desc">Prevents idle timeouts & logs continuous time spent</span>
             </div>
             <label class="master-switch">
-              <input type="checkbox" id="toggle-keep-active" checked>
+              <input type="checkbox" id="toggle-keep-active">
               <span class="master-slider"></span>
             </label>
           </div>
@@ -467,6 +467,31 @@
         <div class="modal-actions">
           <button id="btn-cancel-auto-submit" type="button" class="btn-modal-secondary">Cancel</button>
           <button id="btn-confirm-auto-submit" type="button" class="btn-modal-warning">I Understand & Enable</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Subscription Required Prompt Modal -->
+    <div id="modal-subscription-required" class="modal-overlay" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-icon-wrap" style="width: 48px; height: 48px; border-radius: 50%; background: rgba(99, 102, 241, 0.18); border: 1px solid rgba(99, 102, 241, 0.4); display: flex; align-items: center; justify-content: center;">
+          <span class="modal-icon" style="font-size: 24px;">⭐</span>
+        </div>
+        <h3 class="modal-title" style="color: #a5b4fc; font-size: 15px; font-weight: 700;">Subscription Required</h3>
+        <p class="modal-text" id="modal-sub-required-text" style="color: #cbd5e1; font-size: 12px; line-height: 1.45;">
+          Your 30-minute free trial has ended. All features are locked until Lifetime Pro Access is unlocked.
+        </p>
+        <div class="modal-disclaimer-box" style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.28); border-radius: 8px; padding: 10px; width: 100%; text-align: left;">
+          <span style="font-size: 11.5px; font-weight: 600; color: #e2e8f0; display: block; margin-bottom: 4px;">🚀 Lifetime Pro Access (₹20):</span>
+          <ul style="font-size: 11px; color: #94a3b8; margin: 0; padding-left: 16px; line-height: 1.45;">
+            <li>Unlimited AI question solving & multi-key failover</li>
+            <li>Anti-tab-switch shield & active session keeper</li>
+            <li>Answer HUD, auto-submit & auto-play automation</li>
+          </ul>
+        </div>
+        <div class="modal-actions" style="display: flex; gap: 8px; width: 100%;">
+          <button id="btn-cancel-sub-required" type="button" class="btn-modal-secondary" style="flex: 1;">Cancel</button>
+          <button id="btn-upgrade-sub-required" type="button" class="btn-modal-warning" style="flex: 1.3; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); border-color: #818cf8; color: #fff;">Get Subscription (₹20)</button>
         </div>
       </div>
     </div>

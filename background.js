@@ -1107,6 +1107,47 @@ async function getSubscriptionStatus() {
   const remainingSeconds = Math.ceil(remainingMs / 1000);
   const isTrialExpired = remainingMs <= 0;
 
+  // If trial has expired and user has not paid for Lifetime, automatically turn off all features
+  if (isTrialExpired && !data.isLifetimeActive && data.userProfile?.payment_status !== "paid") {
+    try {
+      const current = await chrome.storage.local.get([
+        "extensionEnabled",
+        "answerPopupEnabled",
+        "autoSubmitEnabled",
+        "autoPlayVideoEnabled",
+        "antiTabSwitchEnabled",
+        "keepWebsiteActiveEnabled"
+      ]);
+      if (
+        current.extensionEnabled !== false ||
+        current.answerPopupEnabled !== false ||
+        current.autoSubmitEnabled !== false ||
+        current.autoPlayVideoEnabled !== false ||
+        current.antiTabSwitchEnabled !== false ||
+        current.keepWebsiteActiveEnabled !== false
+      ) {
+        await chrome.storage.local.set({
+          extensionEnabled: false,
+          answerPopupEnabled: false,
+          autoSubmitEnabled: false,
+          autoPlayVideoEnabled: false,
+          antiTabSwitchEnabled: false,
+          keepWebsiteActiveEnabled: false
+        });
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((tab) => {
+            chrome.tabs.sendMessage(tab.id, { action: "EXTENSION_POWER_TOGGLED", enabled: false }).catch(() => {});
+            chrome.tabs.sendMessage(tab.id, { action: "ANSWER_POPUP_TOGGLED", enabled: false }).catch(() => {});
+            chrome.tabs.sendMessage(tab.id, { action: "AUTO_SUBMIT_TOGGLED", enabled: false }).catch(() => {});
+            chrome.tabs.sendMessage(tab.id, { action: "AUTO_PLAY_VIDEO_TOGGLED", enabled: false }).catch(() => {});
+            chrome.tabs.sendMessage(tab.id, { action: "ANTI_TAB_SWITCH_TOGGLED", enabled: false }).catch(() => {});
+            chrome.tabs.sendMessage(tab.id, { action: "KEEP_ACTIVE_TOGGLED", enabled: false }).catch(() => {});
+          });
+        });
+      }
+    } catch (_) {}
+  }
+
   return {
     status: isTrialExpired ? "TRIAL_EXPIRED" : "TRIAL_ACTIVE",
     isLifetime: false,

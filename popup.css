@@ -1902,5 +1902,25 @@ body {
   color: #fff;
 }
 
+/* Subscription Highlight Animation */
+@keyframes highlightPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.7);
+    border-color: rgba(99, 102, 241, 0.9);
+  }
+  50% {
+    box-shadow: 0 0 24px 6px rgba(99, 102, 241, 0.6);
+    border-color: #818cf8;
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+    border-color: rgba(99, 102, 241, 0.3);
+  }
+}
+
+.highlight-pulse {
+  animation: highlightPulse 1.8s ease-in-out 2 !important;
+}
+
 
 

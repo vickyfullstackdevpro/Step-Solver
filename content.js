@@ -262,7 +262,17 @@
     });
   }
 
-  function toggleExtensionPower(enabled) {
+  async function toggleExtensionPower(enabled) {
+    if (enabled) {
+      try {
+        const sub = await chrome.runtime.sendMessage({ action: "GET_SUBSCRIPTION_STATUS" });
+        if (sub && sub.isTrialExpired && !sub.isLifetime) {
+          showToast("Trial expired. Please open extension to upgrade.");
+          showTrialExpiredBanner(sub.purchaseUrl);
+          enabled = false;
+        }
+      } catch (_) {}
+    }
     state.isEnabled = enabled;
     const host = document.getElementById("gemini-live-host");
     const widget = document.getElementById("gemini-widget");

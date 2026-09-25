@@ -468,7 +468,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (trialExpiredView) trialExpiredView.style.display = "flex";
         if (qrPaymentSection) qrPaymentSection.style.display = "flex";
         if (lifetimeActiveView) lifetimeActiveView.style.display = "none";
-        return;
+        await turnOffAllFeaturesAndNotify("Trial Expired");
+        return response;
       }
 
       // Case 3: Free Trial Active (< 30 Minutes)
@@ -484,6 +485,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           if (trialExpiredView) trialExpiredView.style.display = "flex";
           if (qrPaymentSection) qrPaymentSection.style.display = "flex";
           if (countdownInterval) clearInterval(countdownInterval);
+          turnOffAllFeaturesAndNotify("Trial Expired");
           return;
         }
 
@@ -668,6 +670,99 @@ document.addEventListener("DOMContentLoaded", async () => {
   const btnCancelAutoSubmit = document.getElementById("btn-cancel-auto-submit");
   const btnConfirmAutoSubmit = document.getElementById("btn-confirm-auto-submit");
 
+  // Subscription Required Prompt Modal Elements
+  const modalSubRequired = document.getElementById("modal-subscription-required");
+  const modalSubRequiredText = document.getElementById("modal-sub-required-text");
+  const btnCancelSubRequired = document.getElementById("btn-cancel-sub-required");
+  const btnUpgradeSubRequired = document.getElementById("btn-upgrade-sub-required");
+
+  // Helper: Automatically turn off all features & notify tabs
+  async function turnOffAllFeaturesAndNotify(reason = "Trial Expired") {
+    try {
+      await chrome.storage.local.set({
+        extensionEnabled: false,
+        answerPopupEnabled: false,
+        autoSubmitEnabled: false,
+        autoPlayVideoEnabled: false,
+        antiTabSwitchEnabled: false,
+        keepWebsiteActiveEnabled: false
+      });
+    } catch (_) {}
+
+    if (masterPowerToggle) masterPowerToggle.checked = false;
+    updatePowerUI(false);
+
+    if (toggleAnswerPopup) toggleAnswerPopup.checked = false;
+    updateAnswerPopupUI(false);
+
+    if (toggleAutoSubmit) toggleAutoSubmit.checked = false;
+    isAutoSubmit = false;
+    updateAutoSubmitUI(false);
+
+    if (toggleAutoPlayVideo) toggleAutoPlayVideo.checked = false;
+    updateBadgeUI(autoPlayVideoBadge, false);
+
+    if (toggleAntiTabSwitch) toggleAntiTabSwitch.checked = false;
+    updateBadgeUI(antiTabSwitchBadge, false);
+
+    if (toggleKeepActive) toggleKeepActive.checked = false;
+    updateBadgeUI(keepActiveBadge, false);
+
+    broadcastTabMessage("EXTENSION_POWER_TOGGLED", { enabled: false });
+    broadcastTabMessage("ANSWER_POPUP_TOGGLED", { enabled: false });
+    broadcastTabMessage("AUTO_SUBMIT_TOGGLED", { enabled: false });
+    broadcastTabMessage("AUTO_PLAY_VIDEO_TOGGLED", { enabled: false });
+    broadcastTabMessage("ANTI_TAB_SWITCH_TOGGLED", { enabled: false });
+    broadcastTabMessage("KEEP_ACTIVE_TOGGLED", { enabled: false });
+  }
+
+  // Helper: Verify if user has active trial or lifetime before allowing features to turn ON
+  async function checkFeatureAccess(featureName = "this feature") {
+    try {
+      const sub = await chrome.runtime.sendMessage({ action: "GET_SUBSCRIPTION_STATUS" });
+      if (sub && (sub.isLifetime === true || sub.isTrialExpired === false)) {
+        return true;
+      }
+    } catch (_) {}
+
+    promptToGetSubscription(featureName);
+    return false;
+  }
+
+  // Helper: Show prompt modal when user attempts to turn on feature after trial period
+  function promptToGetSubscription(featureName = "this feature") {
+    turnOffAllFeaturesAndNotify("Subscription Required");
+
+    if (modalSubRequiredText) {
+      modalSubRequiredText.innerText = `Your 30-minute free trial has ended. To enable "${featureName}", please upgrade to Lifetime Pro Access for ₹20.`;
+    }
+
+    if (modalSubRequired) {
+      modalSubRequired.style.display = "flex";
+    }
+
+    showFeedback("Trial expired. Please get a subscription to enable features.", "error");
+  }
+
+  if (btnCancelSubRequired) {
+    btnCancelSubRequired.addEventListener("click", () => {
+      if (modalSubRequired) modalSubRequired.style.display = "none";
+    });
+  }
+
+  if (btnUpgradeSubRequired) {
+    btnUpgradeSubRequired.addEventListener("click", () => {
+      if (modalSubRequired) modalSubRequired.style.display = "none";
+      if (qrPaymentSection) {
+        qrPaymentSection.style.display = "flex";
+        qrPaymentSection.scrollIntoView({ behavior: "smooth", block: "center" });
+        qrPaymentSection.classList.remove("highlight-pulse");
+        void qrPaymentSection.offsetWidth;
+        qrPaymentSection.classList.add("highlight-pulse");
+      }
+    });
+  }
+
   const stored = await chrome.storage.local.get([
     "geminiApiKeys",
     "activeKeyIndex",
@@ -682,23 +777,74 @@ document.addEventListener("DOMContentLoaded", async () => {
     "keepWebsiteActiveEnabled"
   ]);
 
-  const isEnabled = stored.extensionEnabled !== false;
-  if (masterPowerToggle) {
-    masterPowerToggle.checked = isEnabled;
-    updatePowerUI(isEnabled);
+  const toggleAutoPlayVideo = document.getElementById("toggle-auto-play-video");
+  const autoPlayVideoBadge = document.getElementById("auto-play-video-badge");
+  const toggleAntiTabSwitch = document.getElementById("toggle-anti-tab-switch");
+  const antiTabSwitchBadge = document.getElementById("anti-tab-switch-badge");
+  const toggleKeepActive = document.getElementById("toggle-keep-active");
+  const keepActiveBadge = document.getElementById("keep-active-badge");
 
+  let isAutoSubmit = false;
+
+  // Query subscription status to initialize feature states
+  const initSub = await chrome.runtime.sendMessage({ action: "GET_SUBSCRIPTION_STATUS" }).catch(() => null);
+  const isTrialEndedOnLoad = initSub && initSub.isTrialExpired && !initSub.isLifetime;
+
+  if (isTrialEndedOnLoad) {
+    await turnOffAllFeaturesAndNotify("Trial Expired");
+  } else {
+    const isEnabled = stored.extensionEnabled !== false;
+    if (masterPowerToggle) {
+      masterPowerToggle.checked = isEnabled;
+      updatePowerUI(isEnabled);
+    }
+
+    const isAnswerPopup = stored.answerPopupEnabled !== false;
+    if (toggleAnswerPopup) {
+      toggleAnswerPopup.checked = isAnswerPopup;
+      updateAnswerPopupUI(isAnswerPopup);
+    }
+
+    isAutoSubmit = stored.autoSubmitEnabled === true;
+    if (toggleAutoSubmit) {
+      toggleAutoSubmit.checked = isAutoSubmit;
+      updateAutoSubmitUI(isAutoSubmit);
+    }
+
+    const isAutoPlayVideo = stored.autoPlayVideoEnabled !== false;
+    if (toggleAutoPlayVideo) {
+      toggleAutoPlayVideo.checked = isAutoPlayVideo;
+      updateBadgeUI(autoPlayVideoBadge, isAutoPlayVideo);
+    }
+
+    const isAntiTabSwitch = stored.antiTabSwitchEnabled !== false;
+    if (toggleAntiTabSwitch) {
+      toggleAntiTabSwitch.checked = isAntiTabSwitch;
+      updateBadgeUI(antiTabSwitchBadge, isAntiTabSwitch);
+    }
+
+    const isKeepActive = stored.keepWebsiteActiveEnabled !== false;
+    if (toggleKeepActive) {
+      toggleKeepActive.checked = isKeepActive;
+      updateBadgeUI(keepActiveBadge, isKeepActive);
+    }
+  }
+
+  // Master Power Switch
+  if (masterPowerToggle) {
     masterPowerToggle.addEventListener("change", async (e) => {
       const enabled = e.target.checked;
+      if (enabled) {
+        const allowed = await checkFeatureAccess("Extension Power");
+        if (!allowed) {
+          masterPowerToggle.checked = false;
+          updatePowerUI(false);
+          return;
+        }
+      }
       updatePowerUI(enabled);
       await chrome.storage.local.set({ extensionEnabled: enabled });
-      chrome.tabs.query({}, (tabs) => {
-        tabs.forEach((tab) => {
-          chrome.tabs.sendMessage(tab.id, {
-            action: "EXTENSION_POWER_TOGGLED",
-            enabled: enabled
-          }).catch(() => {});
-        });
-      });
+      broadcastTabMessage("EXTENSION_POWER_TOGGLED", { enabled: enabled });
     });
   }
 
@@ -713,24 +859,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Answer Popup Toggle (Default: ON / true)
-  const isAnswerPopup = stored.answerPopupEnabled !== false;
+  // Answer Popup Toggle
   if (toggleAnswerPopup) {
-    toggleAnswerPopup.checked = isAnswerPopup;
-    updateAnswerPopupUI(isAnswerPopup);
-
     toggleAnswerPopup.addEventListener("change", async (e) => {
       const val = e.target.checked;
+      if (val) {
+        const allowed = await checkFeatureAccess("Answer Popup");
+        if (!allowed) {
+          toggleAnswerPopup.checked = false;
+          updateAnswerPopupUI(false);
+          return;
+        }
+      }
       updateAnswerPopupUI(val);
       await chrome.storage.local.set({ answerPopupEnabled: val });
-      chrome.tabs.query({}, (tabs) => {
-        tabs.forEach((tab) => {
-          chrome.tabs.sendMessage(tab.id, {
-            action: "ANSWER_POPUP_TOGGLED",
-            enabled: val
-          }).catch(() => {});
-        });
-      });
+      broadcastTabMessage("ANSWER_POPUP_TOGGLED", { enabled: val });
     });
   }
 
@@ -745,23 +888,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Auto-Submit Toggle with Disclaimer Warning Modal (Default: OFF / false)
-  let isAutoSubmit = stored.autoSubmitEnabled === true;
+  // Auto-Submit Toggle
   if (toggleAutoSubmit) {
-    toggleAutoSubmit.checked = isAutoSubmit;
-    updateAutoSubmitUI(isAutoSubmit);
-
-    toggleAutoSubmit.addEventListener("click", (e) => {
+    toggleAutoSubmit.addEventListener("click", async (e) => {
       const targetChecked = toggleAutoSubmit.checked;
       if (targetChecked) {
-        // Turning ON: Must show warning confirmation modal
         e.preventDefault();
         toggleAutoSubmit.checked = false;
+        const allowed = await checkFeatureAccess("Auto-Submit");
+        if (!allowed) {
+          updateAutoSubmitUI(false);
+          return;
+        }
         if (modalAutoSubmitWarning) {
           modalAutoSubmitWarning.style.display = "flex";
         }
       } else {
-        // Turning OFF: No modal needed
         isAutoSubmit = false;
         updateAutoSubmitUI(false);
         chrome.storage.local.set({ autoSubmitEnabled: false });
@@ -781,6 +923,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (btnConfirmAutoSubmit) {
     btnConfirmAutoSubmit.addEventListener("click", async () => {
       if (modalAutoSubmitWarning) modalAutoSubmitWarning.style.display = "none";
+      const allowed = await checkFeatureAccess("Auto-Submit");
+      if (!allowed) {
+        isAutoSubmit = false;
+        if (toggleAutoSubmit) toggleAutoSubmit.checked = false;
+        updateAutoSubmitUI(false);
+        return;
+      }
       isAutoSubmit = true;
       if (toggleAutoSubmit) toggleAutoSubmit.checked = true;
       updateAutoSubmitUI(true);
@@ -802,67 +951,57 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function notifyAutoSubmitToggled(enabled) {
-    chrome.tabs.query({}, (tabs) => {
-      tabs.forEach((tab) => {
-        chrome.tabs.sendMessage(tab.id, {
-          action: "AUTO_SUBMIT_TOGGLED",
-          enabled: enabled
-        }).catch(() => {});
-      });
-    });
+    broadcastTabMessage("AUTO_SUBMIT_TOGGLED", { enabled: enabled });
   }
 
-  // -------------------------------------------------------------
-  // Auto-Play Video Toggle (Default: ON / true)
-  // -------------------------------------------------------------
-  const toggleAutoPlayVideo = document.getElementById("toggle-auto-play-video");
-  const autoPlayVideoBadge = document.getElementById("auto-play-video-badge");
-  const isAutoPlayVideo = stored.autoPlayVideoEnabled !== false;
-
+  // Auto-Play Video Toggle
   if (toggleAutoPlayVideo) {
-    toggleAutoPlayVideo.checked = isAutoPlayVideo;
-    updateBadgeUI(autoPlayVideoBadge, isAutoPlayVideo);
-
     toggleAutoPlayVideo.addEventListener("change", async (e) => {
       const val = e.target.checked;
+      if (val) {
+        const allowed = await checkFeatureAccess("Auto-Play Video");
+        if (!allowed) {
+          toggleAutoPlayVideo.checked = false;
+          updateBadgeUI(autoPlayVideoBadge, false);
+          return;
+        }
+      }
       updateBadgeUI(autoPlayVideoBadge, val);
       await chrome.storage.local.set({ autoPlayVideoEnabled: val });
       broadcastTabMessage("AUTO_PLAY_VIDEO_TOGGLED", { enabled: val });
     });
   }
 
-  // -------------------------------------------------------------
-  // Anti-Tab-Switching Protection Toggle (Default: ON / true)
-  // -------------------------------------------------------------
-  const toggleAntiTabSwitch = document.getElementById("toggle-anti-tab-switch");
-  const antiTabSwitchBadge = document.getElementById("anti-tab-switch-badge");
-  const isAntiTabSwitch = stored.antiTabSwitchEnabled !== false;
-
+  // Anti-Tab-Switching Protection Toggle
   if (toggleAntiTabSwitch) {
-    toggleAntiTabSwitch.checked = isAntiTabSwitch;
-    updateBadgeUI(antiTabSwitchBadge, isAntiTabSwitch);
-
     toggleAntiTabSwitch.addEventListener("change", async (e) => {
       const val = e.target.checked;
+      if (val) {
+        const allowed = await checkFeatureAccess("Block Tab-Switching");
+        if (!allowed) {
+          toggleAntiTabSwitch.checked = false;
+          updateBadgeUI(antiTabSwitchBadge, false);
+          return;
+        }
+      }
       updateBadgeUI(antiTabSwitchBadge, val);
       await chrome.storage.local.set({ antiTabSwitchEnabled: val });
       broadcastTabMessage("ANTI_TAB_SWITCH_TOGGLED", { enabled: val });
     });
   }
 
-  // -------------------------------------------------------------
-  // Keep Website Active Toggle (Default: ON / true)
-  // -------------------------------------------------------------
-  const toggleKeepActive = document.getElementById("toggle-keep-active");
-  const keepActiveBadge = document.getElementById("keep-active-badge");
-  const isKeepActive = stored.keepWebsiteActiveEnabled !== false;
-
+  // Keep Website Active Toggle
   if (toggleKeepActive) {
-    toggleKeepActive.checked = isKeepActive;
-    updateBadgeUI(keepActiveBadge, isKeepActive);
-
     toggleKeepActive.addEventListener("change", async (e) => {
       const val = e.target.checked;
+      if (val) {
+        const allowed = await checkFeatureAccess("Keep Website Active");
+        if (!allowed) {
+          toggleKeepActive.checked = false;
+          updateBadgeUI(keepActiveBadge, false);
+          return;
+        }
+      }
       updateBadgeUI(keepActiveBadge, val);
       await chrome.storage.local.set({ keepWebsiteActiveEnabled: val });
       broadcastTabMessage("KEEP_ACTIVE_TOGGLED", { enabled: val });
