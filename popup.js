@@ -186,6 +186,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       tabSignIn.classList.add("active");
       tabSignUp.classList.remove("active");
       if (authNameGroup) authNameGroup.style.display = "none";
+      if (authNameInput) authNameInput.required = false;
       if (authTitle) authTitle.innerText = "Welcome to Step Solver";
       if (authSubtitle) authSubtitle.innerText = "Sign in to access your AI solver and active subscription.";
       if (btnAuthText) btnAuthText.innerText = "Sign In";
@@ -193,6 +194,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       tabSignUp.classList.add("active");
       tabSignIn.classList.remove("active");
       if (authNameGroup) authNameGroup.style.display = "block";
+      if (authNameInput) authNameInput.required = true;
       if (authTitle) authTitle.innerText = "Create Your Account";
       if (authSubtitle) authSubtitle.innerText = "Get a 30-minute free trial with full AI solving unlocked.";
       if (btnAuthText) btnAuthText.innerText = "Create Account & Start Trial";
@@ -210,17 +212,47 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (authForm) {
     authForm.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const email = (authEmailInput?.value || "").trim();
+      const email = (authEmailInput?.value || "").trim().toLowerCase();
       const password = (authPasswordInput?.value || "").trim();
       const fullName = (authNameInput?.value || "").trim();
 
-      if (!email || !password) {
-        showAuthFeedback("Please provide both email and password.", "error");
+      const gmailRegex = /^[a-zA-Z0-9._%+-]+@gmail\.com$/;
+
+      if (authMode === "signup") {
+        if (!fullName || fullName.length < 2) {
+          showAuthFeedback("Please enter your name. Full name is required to create an account.", "error");
+          if (authNameInput) authNameInput.focus();
+          return;
+        }
+
+        if (!email) {
+          showAuthFeedback("Please enter your email address.", "error");
+          if (authEmailInput) authEmailInput.focus();
+          return;
+        }
+
+        if (!gmailRegex.test(email)) {
+          showAuthFeedback("Only personal @gmail.com accounts are allowed. Temporary or disposable emails are blocked.", "error");
+          if (authEmailInput) authEmailInput.focus();
+          return;
+        }
+      } else {
+        if (!email) {
+          showAuthFeedback("Please enter your email address.", "error");
+          if (authEmailInput) authEmailInput.focus();
+          return;
+        }
+      }
+
+      if (!password) {
+        showAuthFeedback("Please enter your password.", "error");
+        if (authPasswordInput) authPasswordInput.focus();
         return;
       }
 
       if (password.length < 6) {
         showAuthFeedback("Password must be at least 6 characters.", "error");
+        if (authPasswordInput) authPasswordInput.focus();
         return;
       }
 

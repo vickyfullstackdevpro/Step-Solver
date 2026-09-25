@@ -71,7 +71,16 @@ async function authSignUp(email, password, fullName = "") {
   if (password.length < 6) throw new Error("Password must be at least 6 characters.");
 
   const cleanEmail = email.trim().toLowerCase();
-  const cleanName = (fullName || "").trim() || cleanEmail.split("@")[0];
+  const gmailRegex = /^[a-zA-Z0-9._%+-]+@gmail\.com$/;
+  if (!gmailRegex.test(cleanEmail)) {
+    throw new Error("Only personal @gmail.com accounts are allowed. Temporary or disposable emails are blocked.");
+  }
+
+  const cleanName = (fullName || "").trim();
+  if (!cleanName || cleanName.length < 2) {
+    throw new Error("Please enter your name. Full name is required to create an account.");
+  }
+
   const deviceId = await getOrCreateDeviceId();
   const deviceName = getDeviceFriendlyName();
   const nowIso = new Date().toISOString();
