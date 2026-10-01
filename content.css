@@ -446,32 +446,9 @@ input:checked + .gemini-slider:before {
   background: rgba(255, 255, 255, 0.16);
 }
 
-/* Floating Toast Notification */
+/* Floating Toast Notification (Disabled / Removed) */
 .gemini-toast {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  background: var(--gemini-bg);
-  backdrop-filter: blur(14px);
-  border: 1px solid var(--gemini-border);
-  border-radius: 10px;
-  padding: 10px 16px;
-  color: #fff;
-  font-size: 12.5px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  transform: translateY(100px);
-  opacity: 0;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  z-index: 2147483647;
-}
-
-.gemini-toast.show {
-  transform: translateY(0);
-  opacity: 1;
+  display: none !important;
 }
 
 /* Dragging Optimization (Zero Lag, Instant 1:1 Tracking) */

@@ -18,6 +18,7 @@
     answerPopupEnabled: true,
     autoSubmitEnabled: false,
     autoPlayVideoEnabled: true,
+    loopVideoEnabled: false,
     antiTabSwitchEnabled: true,
     keepWebsiteActiveEnabled: true,
     playedVideoKeys: new Set(),
@@ -46,6 +47,7 @@
       "answerPopupEnabled",
       "autoSubmitEnabled",
       "autoPlayVideoEnabled",
+      "loopVideoEnabled",
       "antiTabSwitchEnabled",
       "keepWebsiteActiveEnabled"
     ]);
@@ -67,6 +69,9 @@
     if (stored.autoPlayVideoEnabled !== undefined) {
       state.autoPlayVideoEnabled = stored.autoPlayVideoEnabled;
     }
+    if (stored.loopVideoEnabled !== undefined) {
+      state.loopVideoEnabled = stored.loopVideoEnabled;
+    }
     if (stored.antiTabSwitchEnabled !== undefined) {
       state.antiTabSwitchEnabled = stored.antiTabSwitchEnabled;
     }
@@ -80,6 +85,7 @@
     initKeepWebsiteActive();
     ensureVideoWatcher();
     handleAutoPlayVideo();
+    handleLoopVideo();
 
     const host = document.createElement("div");
     host.id = "gemini-live-host";
@@ -180,10 +186,6 @@
         </div>
       </div>
 
-      <!-- Floating Toast -->
-      <div id="gemini-toast" class="gemini-toast">
-        <span id="gemini-toast-msg">Notification</span>
-      </div>
     `;
 
     document.body.appendChild(host);
@@ -460,12 +462,8 @@
   }
 
   function showToast(message) {
-    const toast = document.getElementById("gemini-toast");
-    const toastMsg = document.getElementById("gemini-toast-msg");
-    if (!toast || !toastMsg) return;
-    toastMsg.innerText = message;
-    toast.classList.add("show");
-    setTimeout(() => toast.classList.remove("show"), 3500);
+    // Bottom-right toast removed per user request; log to console for debugging
+    console.log("[Step Solver Toast]", message);
   }
 
   function showInfo(infoText) {
@@ -989,6 +987,17 @@
       pageText.includes("form a sentence") ||
       (pageText.includes("rearrange") && pageText.includes("read it aloud"))
     );
+
+    // CRITICAL: S1-S6 / PQRS Paragraph Rearrangement with permutation choices (e.g., BDCA, CABD, QSRP):
+    // These are MCQ questions where candidates select a permutation card, NOT interactive chip rearrange!
+    const hasS1S6Indicators = /\bS1\b/i.test(pageText) && (/\bS[56]\b/i.test(pageText) || /\b[PQRS]\s*[:\.]/i.test(pageText) || /\b[ABCD]\s*[:\.]/i.test(pageText));
+    const hasPermutationPattern = (
+      /\b([A-D]{4}|[P-S]{4}|[A-D]\s*[-–,]\s*[A-D]\s*[-–,]\s*[A-D]\s*[-–,]\s*[A-D])\b/i.test(pageText) ||
+      /\b([1-4]{4}|[1-4]\s*[-–,]\s*[1-4]\s*[-–,]\s*[1-4]\s*[-–,]\s*[1-4])\b/i.test(pageText)
+    );
+    if (hasS1S6Indicators || hasPermutationPattern) {
+      return false;
+    }
 
     if (isFillBlankOrChoose && !hasRearrangeKeywords) {
       return false;
@@ -2012,6 +2021,7 @@
 
     let placedCount = 0;
     const placedLabels = [];
+    const clickedChips = new Set();
 
     // Sequentially place each word into its respective blank
     for (let i = 0; i < orderedWords.length; i++) {
@@ -2023,18 +2033,24 @@
       const liveBlanks = findClozeBlanks(document.body);
       const targetBlank = liveBlanks[i] || null;
 
-      // Click the blank slot first to ensure StepTest focuses / selects this slot
+      // Click the blank slot first to ensure StepTest focuses / activates this specific slot
       if (targetBlank) {
         try {
           if (typeof targetBlank.focus === "function") targetBlank.focus();
           simulateClick(targetBlank);
           targetBlank.dispatchEvent(new Event("focus", { bubbles: true }));
-          await delay(100);
+          await delay(120);
         } catch (_) {}
       }
 
-      // 2. Fresh query for live unplaced chips
-      const liveChips = findClozeChips(document.body);
+      // 2. Fresh query for live unplaced chips (exclude already clicked chips and selected chips)
+      const liveChips = findClozeChips(document.body).filter(c => {
+        if (!c || !c.element) return false;
+        if (clickedChips.has(c.element)) return false;
+        if (c.element.classList.contains("selected") || c.element.classList.contains("placed") || c.element.getAttribute("data-placed") === "true") return false;
+        return true;
+      });
+
       let matchingChip = liveChips.find(c => {
         const cleanChip = cleanString(c.text);
         return cleanChip === cleanTarget;
@@ -2043,10 +2059,10 @@
         return cleanChip.includes(cleanTarget) || cleanTarget.includes(cleanChip);
       });
 
-      // Fallback search across visible candidate elements
+      // Fallback search across visible candidate elements (strict single-click guarantee)
       if (!matchingChip) {
         const liveCandidate = Array.from(document.querySelectorAll("button, div[role='button'], [class*='chip' i], span"))
-          .filter(el => isElementVisible(el) && !isNavOrSystem(el))
+          .filter(el => isElementVisible(el) && !isNavOrSystem(el) && !clickedChips.has(el) && !el.classList.contains("selected"))
           .find(el => {
             const cleanEl = cleanString(safeText(el));
             return cleanEl === cleanTarget || cleanEl.includes(cleanTarget);
@@ -2056,8 +2072,10 @@
         }
       }
 
-      if (matchingChip && matchingChip.element) {
+      // Single-click guarantee: verify not already clicked
+      if (matchingChip && matchingChip.element && !clickedChips.has(matchingChip.element)) {
         simulateClick(matchingChip.element);
+        clickedChips.add(matchingChip.element);
         placedCount++;
         placedLabels.push(`${i + 1}: ${matchingChip.text}`);
 
@@ -2393,9 +2411,17 @@
 
     console.log("[Gemini Live] Clicking rearrange tokens in order:", orderedSequence.map(t => `[${t.index}] ${t.text.slice(0, 30)}...`));
 
-    // Sequentially click each token in order
+    // Sequentially click each token in order with strict single-click guarantee
+    const clickedTokens = new Set();
     for (const token of orderedSequence) {
+      if (!token || !token.element) continue;
+      if (clickedTokens.has(token.element)) continue;
+      if (token.element.classList.contains("selected") || token.element.classList.contains("placed") || token.element.getAttribute("data-placed") === "true") {
+        clickedTokens.add(token.element);
+        continue;
+      }
       simulateClick(token.element);
+      clickedTokens.add(token.element);
       await delay(Math.max(300, state.typingDelayMs || 250));
     }
 
@@ -2500,6 +2526,19 @@
       return isElementVisible(el);
     });
 
+    const isStartMatch = (rawTxt, el) => {
+      const txt = (rawTxt || "").toLowerCase().trim();
+      if (txt.includes("restart") || txt.includes("starting")) return false;
+      if (/^(start|start\s*test|start\s*assessment|begin|begin\s*test|get\s*started|start\s*now|take\s*test|take\s*assessment)$/i.test(txt)) return true;
+      if (/^start\b/i.test(txt) && !txt.includes("option") && !txt.includes("restart")) return true;
+      if (/^begin\b/i.test(txt) && !txt.includes("option")) return true;
+      const cls = (el.className || "").toString().toLowerCase();
+      if ((cls.includes("start-btn") || cls.includes("btn-start") || cls.includes("begin-btn") || cls.includes("btn-begin")) && !txt.includes("restart")) return true;
+      const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+      if (/^(start|begin)\b/i.test(aria) && !aria.includes("restart")) return true;
+      return false;
+    };
+
     const isSubmitMatch = (rawTxt, el) => {
       const txt = (rawTxt || "").toLowerCase().trim();
       if (txt === "submitted" || txt.includes("already submitted") || txt.includes("feedback")) return false;
@@ -2517,13 +2556,20 @@
       if (/^continue\b/i.test(txt) && !txt.includes("option")) return true;
       if (/^proceed\b/i.test(txt)) return true;
       const cls = (el.className || "").toString().toLowerCase();
-      if ((cls.includes("next-btn") || cls.includes("btn-next")) && !txt.includes("submit")) return true;
+      if ((cls.includes("next-btn") || cls.includes("btn-next") || cls.includes("continue-btn") || cls.includes("btn-continue")) && !txt.includes("submit")) return true;
       const aria = (el.getAttribute("aria-label") || "").toLowerCase();
-      if (/^next\b/i.test(aria)) return true;
+      if (/^(next|continue)\b/i.test(aria)) return true;
       return false;
     };
 
-    const matcher = actionType === "submit" ? isSubmitMatch : isNextMatch;
+    let matcher;
+    if (actionType === "start") {
+      matcher = isStartMatch;
+    } else if (actionType === "submit") {
+      matcher = isSubmitMatch;
+    } else {
+      matcher = isNextMatch;
+    }
 
     for (const el of candidates) {
       const txt = safeText(el);
@@ -2563,20 +2609,66 @@
   }
 
   // -------------------------------------------------------------
-  // Auto-Submit & Auto-Next Execution Controllers
+  // Auto-Submit & Auto-Next / Auto-Start Execution Controllers
   // -------------------------------------------------------------
   let autoNextTimer = null;
   let isAutoNextClicking = false;
+  let autoStartTimer = null;
+  let isAutoStartClicking = false;
   let answerWatcherTimer = null;
 
   function ensureAnswerPageWatcher() {
     if (answerWatcherTimer) return;
     answerWatcherTimer = setInterval(() => {
       if (!state.isEnabled || !state.autoSubmitEnabled) return;
+
+      // 1. Answer or Feedback page -> Auto Next / Continue
       if (isAnswerOrFeedbackPage() && !autoNextTimer && !isAutoNextClicking) {
         handleAutoNext();
+        return;
+      }
+
+      // 2. Launch / Welcome page -> Auto Start / Begin
+      const startBtn = findActionElement("start");
+      if (startBtn && !isButtonDisabled(startBtn) && !autoStartTimer && !isAutoStartClicking) {
+        handleAutoStart();
+        return;
       }
     }, 600);
+  }
+
+  async function handleAutoStart() {
+    if (!state.autoSubmitEnabled || isAutoStartClicking) return;
+    if (autoStartTimer) return;
+
+    // Do not trigger start if currently in an active question with options/inputs
+    const container = findActiveQuestionContainer();
+    const hasActiveQuestion = !!(container && (
+      container.querySelector("input[type='radio'], input[type='checkbox'], select, textarea") ||
+      container.querySelector(".option, .choice, [class*='option' i], [class*='chip' i]")
+    ));
+    if (hasActiveQuestion) return;
+
+    const startBtn = findActionElement("start");
+    if (!startBtn || isButtonDisabled(startBtn)) return;
+
+    updateStatus("Starting in 1s...", "working", "START");
+    console.log("[Step Solver] Start/Begin button detected. Auto-Start scheduled in 1000ms...");
+
+    autoStartTimer = setTimeout(async () => {
+      autoStartTimer = null;
+      if (!state.autoSubmitEnabled || isAutoStartClicking) return;
+
+      const btn = findActionElement("start");
+      if (btn && !isButtonDisabled(btn)) {
+        isAutoStartClicking = true;
+        console.log("[Step Solver] Auto-Start (1s elapsed): Clicking Start/Begin button to launch assessment...");
+        updateStatus("Starting...", "working", "START");
+        simulateClick(btn);
+        await delay(1800);
+        isAutoStartClicking = false;
+      }
+    }, 1000);
   }
 
   async function handleAutoNext() {
@@ -2812,12 +2904,64 @@
     }
   }
 
+  function handleLoopVideo() {
+    if (!state.isEnabled || !state.loopVideoEnabled) return;
+
+    // 1. HTML5 native videos
+    const html5Videos = Array.from(document.querySelectorAll("video")).filter(v => {
+      return isElementVisible(v) && !v.closest("#gemini-live-host");
+    });
+
+    for (const video of html5Videos) {
+      if (!video.__stepSolverLoopBound__) {
+        video.__stepSolverLoopBound__ = true;
+        video.loop = true;
+        video.addEventListener("ended", () => {
+          if (state.loopVideoEnabled) {
+            console.log("[Step Solver] Video ended. Replaying (Loop Video)...");
+            video.currentTime = 0;
+            video.play().catch(() => {});
+          }
+        });
+      }
+      video.loop = state.loopVideoEnabled;
+      if (video.ended) {
+        video.currentTime = 0;
+        video.play().catch(() => {});
+      }
+    }
+  }
+
+  // YouTube player state 0 = ENDED; auto-replay when Loop Video is active
+  window.addEventListener("message", (event) => {
+    if (!state.loopVideoEnabled) return;
+    try {
+      const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      if (data && data.event === "onStateChange" && data.info === 0) {
+        console.log("[Step Solver] YouTube video finished. Replaying due to Loop Video...");
+        const iframes = Array.from(document.querySelectorAll("iframe")).filter(f => {
+          if (!isElementVisible(f) || f.closest("#gemini-live-host")) return false;
+          const s = (f.src || "").toLowerCase();
+          return s.includes("youtube.com") || s.includes("youtube-nocookie.com") || s.includes("youtu.be");
+        });
+        for (const iframe of iframes) {
+          playYouTubeIframe(iframe);
+        }
+      }
+    } catch (_) {}
+  });
+
   let videoWatcherInterval = null;
   function ensureVideoWatcher() {
     if (videoWatcherInterval) return;
     videoWatcherInterval = setInterval(() => {
-      if (!state.isEnabled || !state.autoPlayVideoEnabled) return;
-      handleAutoPlayVideo();
+      if (!state.isEnabled) return;
+      if (state.autoPlayVideoEnabled) {
+        handleAutoPlayVideo();
+      }
+      if (state.loopVideoEnabled) {
+        handleLoopVideo();
+      }
     }, 1500);
   }
 
@@ -3232,6 +3376,12 @@
         handleAutoPlayVideo();
       }
       sendResponse({ autoPlayVideoEnabled: state.autoPlayVideoEnabled });
+    } else if (msg.action === "LOOP_VIDEO_TOGGLED") {
+      state.loopVideoEnabled = msg.enabled;
+      if (state.loopVideoEnabled) {
+        handleLoopVideo();
+      }
+      sendResponse({ loopVideoEnabled: state.loopVideoEnabled });
     } else if (msg.action === "ANTI_TAB_SWITCH_TOGGLED") {
       state.antiTabSwitchEnabled = msg.enabled;
       syncProtectionSettings();
@@ -3266,6 +3416,12 @@
         state.autoPlayVideoEnabled = changes.autoPlayVideoEnabled.newValue;
         if (state.autoPlayVideoEnabled) {
           handleAutoPlayVideo();
+        }
+      }
+      if (changes.loopVideoEnabled !== undefined) {
+        state.loopVideoEnabled = changes.loopVideoEnabled.newValue;
+        if (state.loopVideoEnabled) {
+          handleLoopVideo();
         }
       }
       if (changes.antiTabSwitchEnabled !== undefined) {
