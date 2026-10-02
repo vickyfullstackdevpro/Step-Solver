@@ -80,11 +80,12 @@
       state.keepWebsiteActiveEnabled = stored.keepWebsiteActiveEnabled;
     }
 
-    // Initialize MAIN world protection, keep-active heartbeat, and video watcher
+    // Initialize MAIN world protection, keep-active heartbeat, video watcher, and user gesture unmute
     ensureMainWorldProtectionScript();
     syncProtectionSettings();
     initKeepWebsiteActive();
     ensureVideoWatcher();
+    initUserInteractionUnmute();
     handleAutoPlayVideo();
 
     const host = document.createElement("div");
@@ -2826,56 +2827,119 @@
     return `html5_video_${video.id || "default"}`;
   }
 
+  function initUserInteractionUnmute() {
+    const handleGesture = () => {
+      try {
+        const videos = document.querySelectorAll("video");
+        for (const v of videos) {
+          if (v && v.muted) {
+            v.muted = false;
+            if (v.paused) v.play().catch(() => {});
+          }
+        }
+      } catch (_) {}
+    };
+    window.addEventListener("click", handleGesture, { capture: true, passive: true });
+    window.addEventListener("keydown", handleGesture, { capture: true, passive: true });
+  }
+
   function playYouTubeIframe(iframe) {
+    if (!iframe || !iframe.contentWindow) return;
+
+    // 1. Ensure allow attribute includes autoplay permissions for cross-origin iframe
     try {
-      // Ensure enablejsapi=1 is present
-      if (iframe.src && !iframe.src.includes("enablejsapi=1")) {
-        const sep = iframe.src.includes("?") ? "&" : "?";
-        iframe.src = iframe.src + sep + "enablejsapi=1";
+      const currentAllow = iframe.getAttribute("allow") || "";
+      if (!currentAllow.toLowerCase().includes("autoplay")) {
+        iframe.setAttribute("allow", currentAllow ? `${currentAllow}; autoplay` : "autoplay; encrypted-media; fullscreen");
       }
+    } catch (_) {}
+
+    try {
+      // 2. Handshake
+      iframe.contentWindow.postMessage(JSON.stringify({
+        event: "listening",
+        id: iframe.id || 1,
+        channel: "widget"
+      }), "*");
+
+      // 3. Play command with correct args array
       iframe.contentWindow.postMessage(JSON.stringify({
         event: "command",
         func: "playVideo",
-        args: ""
+        args: []
       }), "*");
+
+      // 4. Autoplay policy bypass sequence (mute -> play -> unmute)
+      iframe.contentWindow.postMessage(JSON.stringify({
+        event: "command",
+        func: "mute",
+        args: []
+      }), "*");
+      iframe.contentWindow.postMessage(JSON.stringify({
+        event: "command",
+        func: "playVideo",
+        args: []
+      }), "*");
+      setTimeout(() => {
+        try {
+          iframe.contentWindow.postMessage(JSON.stringify({
+            event: "command",
+            func: "unMute",
+            args: []
+          }), "*");
+        } catch (_) {}
+      }, 600);
     } catch (_) {}
 
     // Fallback simulate click on iframe or play overlay
     try {
-      simulateClick(iframe);
-      const playBtn = iframe.parentElement?.querySelector("button, [class*='play' i], .ytp-large-play-button");
+      const container = iframe.closest(".video-container, .question-video, .video-player, [class*='video' i]") || iframe.parentElement;
+      const playBtn = container?.querySelector("button, [class*='play' i], .vjs-big-play-button, .ytp-large-play-button");
       if (playBtn) simulateClick(playBtn);
     } catch (_) {}
   }
 
   async function playHTML5Video(video) {
     try {
-      if (video.paused) {
+      if (video.paused && !video.ended) {
         try {
           await video.play();
         } catch (err) {
           console.log("[Step Solver] Autoplay unmuted blocked, retrying muted...");
           video.muted = true;
           await video.play();
-          setTimeout(() => { video.muted = false; }, 600);
+          setTimeout(() => {
+            try {
+              const wasPaused = video.paused;
+              video.muted = false;
+              if (video.paused && !wasPaused) {
+                video.muted = true;
+                video.play().catch(() => {});
+              }
+            } catch (_) {
+              video.muted = true;
+              video.play().catch(() => {});
+            }
+          }, 600);
         }
       }
     } catch (_) {}
 
-    // Custom controls click fallback
+    // Custom controls click fallback (VideoJS big play button / custom play buttons)
     try {
-      const playBtn = video.parentElement?.querySelector(".vjs-play-control, .play-btn, button[class*='play' i], [aria-label*='play' i]");
+      const container = video.closest(".video-container, .question-video, .video-player, [class*='video' i]") || video.parentElement;
+      const playBtn = container?.querySelector(".vjs-big-play-button, .vjs-play-control, .play-btn, button[class*='play' i], [aria-label*='play' i]");
       if (playBtn && video.paused) {
         simulateClick(playBtn);
+      }
+      if (video.paused) {
+        simulateClick(video);
       }
     } catch (_) {}
   }
 
   function handleAutoPlayVideo() {
     if (!state.isEnabled || !state.autoPlayVideoEnabled) return;
-
-    // Do not attempt to play video on answer / feedback page
-    if (isAnswerOrFeedbackPage()) return;
 
     // 1. YouTube iframes
     const iframes = Array.from(document.querySelectorAll("iframe")).filter(f => {
@@ -2889,9 +2953,9 @@
       if (key && !state.playedVideoKeys.has(key)) {
         state.playedVideoKeys.add(key);
         console.log(`%c[Step Solver]%c Auto-playing new YouTube video: ${key}`, "color:#3b82f6;font-weight:bold", "color:#fff");
-        playYouTubeIframe(iframe);
         showToast("Auto-playing video...");
       }
+      playYouTubeIframe(iframe);
     }
 
     // 2. HTML5 native videos
@@ -2904,8 +2968,10 @@
       if (key && !state.playedVideoKeys.has(key)) {
         state.playedVideoKeys.add(key);
         console.log(`%c[Step Solver]%c Auto-playing new HTML5 video: ${key}`, "color:#3b82f6;font-weight:bold", "color:#fff");
-        playHTML5Video(video);
         showToast("Auto-playing video...");
+      }
+      if (video.paused && !video.ended) {
+        playHTML5Video(video);
       }
     }
 

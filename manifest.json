@@ -39,8 +39,12 @@
     },
     {
       "matches": [
-        "*://www.youtube.com/embed/*",
-        "*://www.youtube-nocookie.com/embed/*"
+        "*://*.youtube.com/embed/*",
+        "*://youtube.com/embed/*",
+        "*://*.youtube-nocookie.com/embed/*",
+        "*://youtube-nocookie.com/embed/*",
+        "*://*.youtube.com/v/*",
+        "*://youtube.com/v/*"
       ],
       "js": ["youtube_loop.js"],
       "run_at": "document_idle",
