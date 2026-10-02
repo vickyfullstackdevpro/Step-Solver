@@ -22,6 +22,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         success: false,
         error: err.message,
         code: err.code,
+        isBanned: !!err.isBanned,
+        bannedUntil: err.bannedUntil,
         isTrialExpired: !!err.isTrialExpired,
         purchaseUrl: err.purchaseUrl || LIFETIME_PURCHASE_URL
       }));
@@ -188,10 +190,20 @@ async function handleSolveQuestion(payload) {
       throw err;
     }
 
-    // 2. Strict Single-Device Concurrency Lock Verification
+    // 2. Strict Multi-Device Concurrency & 1-Day Ban Verification
     const concurrency = await StepAuth.verifyDeviceConcurrency();
+    if (concurrency.isBanned) {
+      // Automatically disable extension features on ban
+      chrome.storage.local.set({ extensionEnabled: false });
+      const unlockMsg = concurrency.unlockFormatted || concurrency.bannedUntil || "in 24 hours";
+      const err = new Error(`Account suspended for 24 hours due to multi-device usage (> 2 devices). Access unlocks at ${unlockMsg}.`);
+      err.code = "USER_BANNED";
+      err.isBanned = true;
+      err.bannedUntil = concurrency.bannedUntil;
+      throw err;
+    }
     if (concurrency.isDeviceActive === false) {
-      const err = new Error("Device revoked. Your account is active on another device. Open the extension popup to claim this device.");
+      const err = new Error("Device revoked or inactive. Please open the extension popup to verify your device.");
       err.code = "DEVICE_REVOKED";
       throw err;
     }
@@ -1042,8 +1054,33 @@ async function getSubscriptionStatus() {
     "deviceTrialStartedAt",
     "licenseKey",
     "lifetimeActivatedAt",
-    "userProfile"
+    "userProfile",
+    "isAccountBanned",
+    "bannedUntil",
+    "bannedUntilMs",
+    "banReason"
   ]);
+
+  // Check if account is suspended / banned for multi-device abuse (> 2 devices)
+  const isBanned = !!data.isAccountBanned || (data.userProfile?.banned_until && new Date(data.userProfile.banned_until).getTime() > Date.now());
+  if (isBanned) {
+    const bannedUntilIso = data.bannedUntil || data.userProfile?.banned_until;
+    const banReason = data.banReason || data.userProfile?.ban_reason || "Multi-device violation (> 2 devices)";
+    const bannedUntilMs = data.bannedUntilMs || (bannedUntilIso ? new Date(bannedUntilIso).getTime() : Date.now() + 86400000);
+    const remBanMs = Math.max(0, bannedUntilMs - Date.now());
+    return {
+      status: "USER_BANNED",
+      isBanned: true,
+      bannedUntil: bannedUntilIso,
+      bannedUntilMs,
+      banRemainingMs: remBanMs,
+      banRemainingMinutes: Math.ceil(remBanMs / 60000),
+      banReason,
+      isLifetime: false,
+      isTrialExpired: true,
+      purchaseUrl: LIFETIME_PURCHASE_URL
+    };
+  }
 
   // If user profile from Supabase indicates paid
   if (data.userProfile && data.userProfile.payment_status === "paid") {

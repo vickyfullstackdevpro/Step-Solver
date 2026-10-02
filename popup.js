@@ -8,12 +8,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   const statusBadge = document.getElementById("status-badge");
   const userAccountBar = document.getElementById("user-account-bar");
   const userEmailDisplay = document.getElementById("user-email-display");
+  const deviceStatusDisplay = document.getElementById("device-status-display");
   const btnSignOut = document.getElementById("btn-sign-out");
 
   const viewAuth = document.getElementById("view-auth");
   const viewVerify = document.getElementById("view-verify");
   const viewDeviceConflict = document.getElementById("view-device-conflict");
+  const viewBanned = document.getElementById("view-banned");
   const viewMain = document.getElementById("view-main");
+
+  // Elements - Banned View
+  const banCountdownTimer = document.getElementById("ban-countdown-timer");
+  const banUnlockTimestamp = document.getElementById("ban-unlock-timestamp");
+  const btnBanSignout = document.getElementById("btn-ban-signout");
+  let banCountdownInterval = null;
 
   // Elements - Auth View
   const authTitle = document.getElementById("auth-title");
@@ -88,15 +96,65 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (viewAuth) viewAuth.style.display = viewName === "auth" ? "flex" : "none";
     if (viewVerify) viewVerify.style.display = viewName === "verify" ? "flex" : "none";
     if (viewDeviceConflict) viewDeviceConflict.style.display = viewName === "conflict" ? "flex" : "none";
+    if (viewBanned) viewBanned.style.display = viewName === "banned" ? "flex" : "none";
     if (viewMain) viewMain.style.display = viewName === "main" ? "flex" : "none";
 
     if (userAccountBar) {
       userAccountBar.style.display = (viewName === "main" || viewName === "conflict") ? "flex" : "none";
     }
+
+    if (viewName !== "banned" && banCountdownInterval) {
+      clearInterval(banCountdownInterval);
+      banCountdownInterval = null;
+    }
+  }
+
+  function startBanCountdown(bannedUntilIso) {
+    if (banCountdownInterval) {
+      clearInterval(banCountdownInterval);
+      banCountdownInterval = null;
+    }
+
+    const bannedUntilMs = new Date(bannedUntilIso).getTime();
+    if (isNaN(bannedUntilMs)) return;
+
+    if (banUnlockTimestamp) {
+      const unlockDate = new Date(bannedUntilMs);
+      banUnlockTimestamp.innerText = `Access restores: ${unlockDate.toLocaleDateString()} at ${unlockDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+
+    function updateTicker() {
+      const now = Date.now();
+      const remainingMs = Math.max(0, bannedUntilMs - now);
+
+      if (remainingMs <= 0) {
+        if (banCountdownTimer) banCountdownTimer.innerText = "00h 00m 00s";
+        if (banCountdownInterval) {
+          clearInterval(banCountdownInterval);
+          banCountdownInterval = null;
+        }
+        // Ban expired! Re-evaluate state
+        setTimeout(() => checkAuthAndDeviceState(), 1000);
+        return;
+      }
+
+      const totalSec = Math.floor(remainingMs / 1000);
+      const hours = Math.floor(totalSec / 3600);
+      const minutes = Math.floor((totalSec % 3600) / 60);
+      const seconds = totalSec % 60;
+
+      const pad = (n) => String(n).padStart(2, "0");
+      if (banCountdownTimer) {
+        banCountdownTimer.innerText = `${pad(hours)}h ${pad(minutes)}m ${pad(seconds)}s`;
+      }
+    }
+
+    updateTicker();
+    banCountdownInterval = setInterval(updateTicker, 1000);
   }
 
   // -------------------------------------------------------------
-  // 2. Auth & Single-Device State Evaluator (Authoritative DB Truth)
+  // 2. Auth & Multi-Device Concurrency Evaluator (Authoritative DB Truth)
   // -------------------------------------------------------------
   async function checkAuthAndDeviceState() {
     try {
@@ -127,12 +185,20 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (userEmailDisplay) userEmailDisplay.innerText = userEmail;
       if (verifyEmailDisplay) verifyEmailDisplay.innerText = userEmail;
 
-      // Live Single-Device Concurrency Verification from Supabase Database
+      // Live Multi-Device Concurrency & 1-Day Ban Verification from Supabase Database
       const concurrency = await StepAuth.verifyDeviceConcurrency();
 
       if (!concurrency.isAuthenticated) {
         switchView("auth");
         updateHeaderStatus("Auth Required", "disconnected");
+        return;
+      }
+
+      // Check if user account is actively banned (> 2 devices)
+      if (concurrency.isBanned) {
+        switchView("banned");
+        updateHeaderStatus("Suspended", "disconnected");
+        startBanCountdown(concurrency.bannedUntil);
         return;
       }
 
@@ -151,6 +217,21 @@ document.addEventListener("DOMContentLoaded", async () => {
       // Concurrency verified and active on this device!
       switchView("main");
       updateHeaderStatus("Ready", "connected");
+
+      // Update Device Status Badge in User Account Bar
+      if (deviceStatusDisplay) {
+        const activeCount = concurrency.activeDeviceCount || 1;
+        const maxAllowed = concurrency.maxAllowedDevices || 2;
+        if (activeCount >= maxAllowed) {
+          deviceStatusDisplay.innerText = `⚠️ ${activeCount}/${maxAllowed} Devices (Max)`;
+          deviceStatusDisplay.className = "device-status-pill warning";
+          deviceStatusDisplay.title = "Maximum devices reached. Connecting a 3rd device will trigger an automatic 24h ban.";
+        } else {
+          deviceStatusDisplay.innerText = `🔒 ${activeCount}/${maxAllowed} Devices`;
+          deviceStatusDisplay.className = "device-status-pill";
+          deviceStatusDisplay.title = "Account active on 1 of 2 allowed devices.";
+        }
+      }
 
       // 1. Sync authoritative cloud user profile from Supabase (payment_status, trial_started_at)
       await StepAuth.syncUserProfile(session);
@@ -437,6 +518,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  if (btnBanSignout) {
+    btnBanSignout.addEventListener("click", async () => {
+      await StepAuth.authSignOut();
+      switchView("auth");
+      updateHeaderStatus("Auth Required", "disconnected");
+    });
+  }
+
   // -------------------------------------------------------------
   // 6. Subscription, 30-Min Trial & UPI QR Payment Engine
   // -------------------------------------------------------------
@@ -448,6 +537,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (countdownInterval) {
         clearInterval(countdownInterval);
         countdownInterval = null;
+      }
+
+      // Case 0: Account Suspended (Multi-Device Ban)
+      if (response.isBanned) {
+        switchView("banned");
+        updateHeaderStatus("Suspended", "disconnected");
+        startBanCountdown(response.bannedUntil);
+        return response;
       }
 
       // Populate user details for QR verification instructions

@@ -1922,5 +1922,177 @@ body {
   animation: highlightPulse 1.8s ease-in-out 2 !important;
 }
 
+/* ============================================================ */
+/* Multi-Device Security Notice in Login Dashboard */
+/* ============================================================ */
+.auth-security-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(245, 158, 11, 0.1) 100%);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.security-warning-icon {
+  font-size: 18px;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+.security-warning-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.security-warning-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #fca5a5;
+  letter-spacing: 0.2px;
+}
+
+.security-warning-desc {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: #e2e8f0;
+  margin: 0;
+}
+
+.security-warning-desc strong {
+  color: #fef08a;
+}
+
+/* ============================================================ */
+/* VIEW 5: ACCOUNT SUSPENDED (24-Hour Multi-Device Ban) */
+/* ============================================================ */
+.ban-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 24px 18px;
+  border-color: rgba(239, 68, 68, 0.4);
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.12) 0%, rgba(15, 23, 42, 0.95) 100%);
+}
+
+.ban-icon-wrap {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1.5px solid rgba(239, 68, 68, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+.ban-icon {
+  font-size: 26px;
+}
+
+.ban-status-badge {
+  display: inline-block;
+  background: rgba(239, 68, 68, 0.25);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #f87171;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+
+.ban-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: #fecaca;
+  margin: 0;
+}
+
+.ban-desc {
+  font-size: 11.5px;
+  color: #cbd5e1;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ban-desc strong {
+  color: #f87171;
+}
+
+.ban-timer-card {
+  width: 100%;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.ban-timer-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.8px;
+}
+
+.ban-countdown-timer {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 22px;
+  font-weight: 800;
+  color: #ef4444;
+  letter-spacing: 1px;
+  text-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+}
+
+.ban-unlock-timestamp {
+  font-size: 10.5px;
+  color: #cbd5e1;
+}
+
+.ban-info-row {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ban-info-row .info-label {
+  color: #94a3b8;
+}
+
+.ban-info-row .info-val {
+  color: #f1f5f9;
+  font-weight: 600;
+}
+
+.ban-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+/* Device Status Pill Warning State */
+.device-status-pill.warning {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.5);
+  color: #fbbf24;
+}
+
+
 
 
