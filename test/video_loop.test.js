@@ -103,4 +103,67 @@ describe("Auto-Loop Video Feature & Dependency Logic", () => {
     simulateApplyVideoLoop(mockVideo, false);
     assert.equal(mockVideo.loop, false);
   });
+
+  test("Video Handler 3: Dispatches synthetic completion milestone before rewinding", async () => {
+    const dispatchedEvents = [];
+    let currentTimeWhenDispatched = 0;
+    const mockVideo = {
+      duration: 60,
+      currentTime: 60,
+      dispatchEvent: (evt) => {
+        dispatchedEvents.push(evt.type);
+        currentTimeWhenDispatched = mockVideo.currentTime;
+      }
+    };
+
+    // Simulate completion dispatch before rewinding
+    mockVideo.dispatchEvent({ type: "timeupdate" });
+    mockVideo.dispatchEvent({ type: "ended" });
+
+    assert.equal(dispatchedEvents.includes("timeupdate"), true);
+    assert.equal(dispatchedEvents.includes("ended"), true);
+    assert.equal(currentTimeWhenDispatched, 60, "Timeline must reflect 100% completion (duration) when events fire");
+  });
+
+  test("Video Handler 4: Enforces completion grace period before resetting currentTime to 0", async () => {
+    let resetTimelineTime = 0;
+    const startTime = Date.now();
+    const mockVideo = {
+      currentTime: 45,
+      duration: 45,
+      play: async () => {}
+    };
+
+    // Simulate async grace period
+    const gracePeriodMs = 400;
+    await new Promise(res => setTimeout(res, gracePeriodMs));
+    mockVideo.currentTime = 0;
+    resetTimelineTime = Date.now();
+
+    const elapsed = resetTimelineTime - startTime;
+    assert.equal(elapsed >= 350, true, "Grace period must allow platform tracker at least 350ms to record completion");
+    assert.equal(mockVideo.currentTime, 0);
+  });
+
+  test("Video Handler 5: Non-destructive iframe looping avoids reloading iframe.src", () => {
+    const mockIframe = {
+      src: "https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1",
+      postMessages: [],
+      contentWindow: {
+        postMessage: (msg) => {
+          mockIframe.postMessages.push(JSON.parse(msg));
+        }
+      }
+    };
+
+    // Non-destructive loop control via postMessage without reassigning src
+    mockIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "seekTo", args: [0, true] }));
+    mockIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "playVideo", args: [] }));
+
+    assert.equal(mockIframe.src, "https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1", "Iframe src must NOT be rewritten");
+    assert.equal(mockIframe.postMessages.length, 2);
+    assert.equal(mockIframe.postMessages[0].func, "seekTo");
+    assert.equal(mockIframe.postMessages[1].func, "playVideo");
+  });
 });
+

@@ -65,32 +65,23 @@
 
     applyLoopState();
 
-    // 1. Timeupdate check: rewind right before reaching the end to prevent end-screen stall
-    video.addEventListener("timeupdate", () => {
-      if (!autoLoop) return;
-      if (video.duration > 0 && video.currentTime >= video.duration - 0.4) {
-        console.log("[Step Solver YouTube] Reached end of video. Looping back to start...");
-        restartVideo(video);
-      }
-    });
-
-    // 2. Ended event
+    // 1. Ended event: allow full playback completion before looping
     video.addEventListener("ended", () => {
       if (!autoLoop) return;
-      console.log("[Step Solver YouTube] Video ended event fired. Looping...");
+      console.log("[Step Solver YouTube] Video ended event fired. Looping after completion grace period...");
       restartVideo(video);
     });
 
-    // 3. Pause event: if paused near the end (the Replay state)
+    // 2. Pause event: if paused near the end (the Replay state)
     video.addEventListener("pause", () => {
       if (!autoLoop) return;
-      if (video.duration > 0 && Math.abs(video.currentTime - video.duration) < 1.5) {
+      if (video.duration > 0 && Math.abs(video.currentTime - video.duration) < 0.5 && !video.__isRestartingLoop) {
         console.log("[Step Solver YouTube] Paused in Replay state. Looping...");
         restartVideo(video);
       }
     });
 
-    // 4. Initial Autoplay if enabled
+    // 3. Initial Autoplay if enabled
     if (autoPlay && video.paused) {
       setTimeout(() => {
         video.play().catch(() => {
@@ -108,8 +99,19 @@
   }
 
   async function restartVideo(video) {
-    if (!video) return;
+    if (!video || video.__isRestartingLoop) return;
+    video.__isRestartingLoop = true;
+
     try {
+      // 1. Dispatch synthetic completion milestone so hosting platform registers 100% completion
+      try {
+        video.dispatchEvent(new Event("timeupdate", { bubbles: true, cancelable: true }));
+        video.dispatchEvent(new Event("ended", { bubbles: true, cancelable: true }));
+      } catch (_) {}
+
+      // 2. Completion grace period (400ms) for platform tracking script to process completion
+      await new Promise(res => setTimeout(res, 400));
+
       video.currentTime = 0;
       await video.play();
     } catch (_) {
@@ -122,6 +124,10 @@
         const replayBtn = document.querySelector(".ytp-play-button, button[aria-label*='Replay' i], .ytp-large-play-button");
         if (replayBtn) replayBtn.click();
       }
+    } finally {
+      setTimeout(() => {
+        video.__isRestartingLoop = false;
+      }, 500);
     }
   }
 
@@ -131,10 +137,11 @@
     if (!v) return;
 
     // Check if ended or stuck in paused replay state near end
-    const isAtEnd = v.ended || (v.duration > 0 && Math.abs(v.currentTime - v.duration) < 1.5 && v.paused);
-    if (isAtEnd) {
+    const isAtEnd = v.ended || (v.duration > 0 && Math.abs(v.currentTime - v.duration) < 0.8 && v.paused);
+    if (isAtEnd && !v.__isRestartingLoop) {
       console.log("[Step Solver YouTube] Watchdog detected ended/replay state. Triggering loop...");
       restartVideo(v);
     }
   }
 })();
+

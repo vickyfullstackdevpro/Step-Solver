@@ -2926,8 +2926,16 @@
           video.__hasStepLoopListener = true;
           video.addEventListener("ended", async () => {
             if (state.autoLoopVideoEnabled) {
-              console.log("[Step Solver] HTML5 video ended. Auto-looping from start...");
+              console.log("[Step Solver] HTML5 video ended. Auto-looping after completion grace period...");
               try {
+                // 1. Dispatch synthetic completion milestone so hosting platform registers 100% completion
+                try {
+                  video.dispatchEvent(new Event("timeupdate", { bubbles: true, cancelable: true }));
+                } catch (_) {}
+
+                // 2. Completion grace period (400ms) for platform tracking script to process completion
+                await delay(400);
+
                 video.currentTime = 0;
                 await video.play();
               } catch (_) {
@@ -2943,7 +2951,7 @@
       }
     }
 
-    // 2. YouTube iframes
+    // 2. YouTube iframes (Non-destructive: avoid reloading iframe.src)
     if (state.autoLoopVideoEnabled) {
       const iframes = Array.from(document.querySelectorAll("iframe")).filter(f => {
         if (!isElementVisible(f) || f.closest("#gemini-live-host")) return false;
@@ -2957,11 +2965,6 @@
             id: iframe.id || 1,
             channel: "widget"
           }), "*");
-          const ytid = getYouTubeVideoKey(iframe)?.replace("yt_", "");
-          if (ytid && iframe.src && !iframe.src.includes("loop=1")) {
-            const sep = iframe.src.includes("?") ? "&" : "?";
-            iframe.src = `${iframe.src}${sep}loop=1&playlist=${ytid}&enablejsapi=1`;
-          }
         } catch (_) {}
       }
     }
@@ -2989,7 +2992,7 @@
   }
 
   // Listen for YouTube widget events broadcast to window
-  window.addEventListener("message", (event) => {
+  window.addEventListener("message", async (event) => {
     if (!state.isEnabled || !state.autoLoopVideoEnabled) return;
     try {
       let data = event.data;
@@ -3000,7 +3003,9 @@
         (data.event === "onStateChange" && data.info === 0) ||
         (data.event === "infoDelivery" && data.info && data.info.playerState === 0)
       )) {
-        console.log("[Step Solver] YouTube video ended signal received in parent window. Replaying...");
+        console.log("[Step Solver] YouTube video ended signal received in parent window. Replaying after completion grace period...");
+        // Completion grace period (400ms) for platform tracking script to process completion
+        await delay(400);
         restartAllYouTubeIframes();
       }
     } catch (_) {}
