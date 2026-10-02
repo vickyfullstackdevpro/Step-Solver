@@ -1115,7 +1115,6 @@ async function getSubscriptionStatus() {
         "answerPopupEnabled",
         "autoSubmitEnabled",
         "autoPlayVideoEnabled",
-        "loopVideoEnabled",
         "antiTabSwitchEnabled",
         "keepWebsiteActiveEnabled"
       ]);
@@ -1124,7 +1123,6 @@ async function getSubscriptionStatus() {
         current.answerPopupEnabled !== false ||
         current.autoSubmitEnabled !== false ||
         current.autoPlayVideoEnabled !== false ||
-        current.loopVideoEnabled !== false ||
         current.antiTabSwitchEnabled !== false ||
         current.keepWebsiteActiveEnabled !== false
       ) {
@@ -1133,7 +1131,6 @@ async function getSubscriptionStatus() {
           answerPopupEnabled: false,
           autoSubmitEnabled: false,
           autoPlayVideoEnabled: false,
-          loopVideoEnabled: false,
           antiTabSwitchEnabled: false,
           keepWebsiteActiveEnabled: false
         });
@@ -1143,7 +1140,6 @@ async function getSubscriptionStatus() {
             chrome.tabs.sendMessage(tab.id, { action: "ANSWER_POPUP_TOGGLED", enabled: false }).catch(() => {});
             chrome.tabs.sendMessage(tab.id, { action: "AUTO_SUBMIT_TOGGLED", enabled: false }).catch(() => {});
             chrome.tabs.sendMessage(tab.id, { action: "AUTO_PLAY_VIDEO_TOGGLED", enabled: false }).catch(() => {});
-            chrome.tabs.sendMessage(tab.id, { action: "LOOP_VIDEO_TOGGLED", enabled: false }).catch(() => {});
             chrome.tabs.sendMessage(tab.id, { action: "ANTI_TAB_SWITCH_TOGGLED", enabled: false }).catch(() => {});
             chrome.tabs.sendMessage(tab.id, { action: "KEEP_ACTIVE_TOGGLED", enabled: false }).catch(() => {});
           });

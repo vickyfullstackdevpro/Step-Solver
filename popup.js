@@ -684,7 +684,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         answerPopupEnabled: false,
         autoSubmitEnabled: false,
         autoPlayVideoEnabled: false,
-        loopVideoEnabled: false,
         antiTabSwitchEnabled: false,
         keepWebsiteActiveEnabled: false
       });
@@ -703,9 +702,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (toggleAutoPlayVideo) toggleAutoPlayVideo.checked = false;
     updateBadgeUI(autoPlayVideoBadge, false);
 
-    if (toggleLoopVideo) toggleLoopVideo.checked = false;
-    updateBadgeUI(loopVideoBadge, false);
-
     if (toggleAntiTabSwitch) toggleAntiTabSwitch.checked = false;
     updateBadgeUI(antiTabSwitchBadge, false);
 
@@ -716,7 +712,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     broadcastTabMessage("ANSWER_POPUP_TOGGLED", { enabled: false });
     broadcastTabMessage("AUTO_SUBMIT_TOGGLED", { enabled: false });
     broadcastTabMessage("AUTO_PLAY_VIDEO_TOGGLED", { enabled: false });
-    broadcastTabMessage("LOOP_VIDEO_TOGGLED", { enabled: false });
     broadcastTabMessage("ANTI_TAB_SWITCH_TOGGLED", { enabled: false });
     broadcastTabMessage("KEEP_ACTIVE_TOGGLED", { enabled: false });
   }
@@ -778,15 +773,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     "answerPopupEnabled",
     "autoSubmitEnabled",
     "autoPlayVideoEnabled",
-    "loopVideoEnabled",
     "antiTabSwitchEnabled",
     "keepWebsiteActiveEnabled"
   ]);
 
   const toggleAutoPlayVideo = document.getElementById("toggle-auto-play-video");
   const autoPlayVideoBadge = document.getElementById("auto-play-video-badge");
-  const toggleLoopVideo = document.getElementById("toggle-loop-video");
-  const loopVideoBadge = document.getElementById("loop-video-badge");
   const toggleAntiTabSwitch = document.getElementById("toggle-anti-tab-switch");
   const antiTabSwitchBadge = document.getElementById("anti-tab-switch-badge");
   const toggleKeepActive = document.getElementById("toggle-keep-active");
@@ -823,12 +815,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (toggleAutoPlayVideo) {
       toggleAutoPlayVideo.checked = isAutoPlayVideo;
       updateBadgeUI(autoPlayVideoBadge, isAutoPlayVideo);
-    }
-
-    const isLoopVideo = stored.loopVideoEnabled === true;
-    if (toggleLoopVideo) {
-      toggleLoopVideo.checked = isLoopVideo;
-      updateBadgeUI(loopVideoBadge, isLoopVideo);
     }
 
     const isAntiTabSwitch = stored.antiTabSwitchEnabled !== false;
@@ -983,24 +969,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       updateBadgeUI(autoPlayVideoBadge, val);
       await chrome.storage.local.set({ autoPlayVideoEnabled: val });
       broadcastTabMessage("AUTO_PLAY_VIDEO_TOGGLED", { enabled: val });
-    });
-  }
-
-  // Loop Video Toggle
-  if (toggleLoopVideo) {
-    toggleLoopVideo.addEventListener("change", async (e) => {
-      const val = e.target.checked;
-      if (val) {
-        const allowed = await checkFeatureAccess("Loop Video");
-        if (!allowed) {
-          toggleLoopVideo.checked = false;
-          updateBadgeUI(loopVideoBadge, false);
-          return;
-        }
-      }
-      updateBadgeUI(loopVideoBadge, val);
-      await chrome.storage.local.set({ loopVideoEnabled: val });
-      broadcastTabMessage("LOOP_VIDEO_TOGGLED", { enabled: val });
     });
   }
 
