@@ -193,4 +193,41 @@ describe("Subscription & Free Trial Lifecycle", () => {
     assert.equal(result.isTrialExpired, false);
     assert.equal(result.remainingMinutes, 30);
   });
+
+  test("Rule 8: Page refresh preserves remaining trial time without resetting to 30m", () => {
+    const baseTime = 1775000000000;
+    // User started trial 18 minutes ago
+    const startedAt = baseTime - (18 * 60 * 1000);
+    const storageOnRefresh = {
+      trialStartedAt: startedAt,
+      userProfile: {
+        id: "usr-123",
+        email: "test@gmail.com",
+        payment_status: "unpaid",
+        trial_started_at: null // Server had not yet saved trial timestamp
+      }
+    };
+
+    const result = evaluateSubscriptionStatus(storageOnRefresh, baseTime);
+    assert.equal(result.status, "TRIAL_ACTIVE");
+    assert.equal(result.remainingMinutes, 12); // Exactly 30 - 18 = 12 minutes remaining
+    assert.notEqual(result.remainingMinutes, 30, "Trial must NOT reset to 30 minutes on refresh");
+  });
+
+  test("Rule 9: Pro lifetime access reflects immediately and is never reverted", () => {
+    const storageWithPro = {
+      isLifetimeActive: true,
+      userProfile: {
+        id: "usr-pro",
+        email: "vicky636501@gmail.com",
+        payment_status: "paid"
+      }
+    };
+
+    const result = evaluateSubscriptionStatus(storageWithPro);
+    assert.equal(result.status, "LIFETIME_ACTIVE");
+    assert.equal(result.isLifetime, true);
+    assert.equal(result.isTrialExpired, false);
+  });
 });
+

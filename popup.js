@@ -173,15 +173,18 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
+      // Re-read fresh session in case validateSessionOnServer refreshed the access token
+      const currentSession = (await StepAuth.getStoredSession()) || session;
+
       // Check user email confirmation status
       if (authUser.email_confirmed_at === null && !authUser.confirmed_at) {
         switchView("verify");
-        if (verifyEmailDisplay) verifyEmailDisplay.innerText = authUser.email || session.user?.email || "";
+        if (verifyEmailDisplay) verifyEmailDisplay.innerText = authUser.email || currentSession.user?.email || "";
         updateHeaderStatus("Verify Email", "disconnected");
         return;
       }
 
-      const userEmail = authUser.email || session.user?.email || "";
+      const userEmail = authUser.email || currentSession.user?.email || "";
       if (userEmailDisplay) userEmailDisplay.innerText = userEmail;
       if (verifyEmailDisplay) verifyEmailDisplay.innerText = userEmail;
 
@@ -234,7 +237,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       // 1. Sync authoritative cloud user profile from Supabase (payment_status, trial_started_at)
-      await StepAuth.syncUserProfile(session);
+      await StepAuth.syncUserProfile(currentSession);
 
       // 2. Check and update subscription & trial status
       await updateSubscriptionUI();
@@ -731,10 +734,15 @@ document.addEventListener("DOMContentLoaded", async () => {
             manualStatusFeedback.innerText = "✓ Lifetime Access Verified & Activated!";
             manualStatusFeedback.style.display = "block";
           }
-          await chrome.storage.local.set({ isLifetimeActive: true });
+          const prof = statusRes.profile || {};
+          prof.payment_status = "paid";
+          await chrome.storage.local.set({
+            isLifetimeActive: true,
+            userProfile: prof
+          });
           setTimeout(async () => {
             await updateSubscriptionUI();
-          }, 1200);
+          }, 600);
         } else {
           if (manualStatusFeedback) {
             manualStatusFeedback.className = "manual-status-feedback pending";

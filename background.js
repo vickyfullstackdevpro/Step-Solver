@@ -1082,31 +1082,11 @@ async function getSubscriptionStatus() {
     };
   }
 
-  // If user profile from Supabase indicates paid
-  if (data.userProfile && data.userProfile.payment_status === "paid") {
+  // If user profile indicates paid OR lifetime access is active in storage
+  if ((data.userProfile && data.userProfile.payment_status === "paid") || data.isLifetimeActive === true) {
     if (!data.isLifetimeActive) {
       await chrome.storage.local.set({ isLifetimeActive: true });
     }
-    return {
-      status: "LIFETIME_ACTIVE",
-      isLifetime: true,
-      isTrialExpired: false,
-      remainingMs: Infinity,
-      remainingMinutes: Infinity,
-      remainingSeconds: Infinity,
-      purchaseUrl: LIFETIME_PURCHASE_URL
-    };
-  }
-
-  // If user profile from Supabase explicitly indicates NOT paid
-  if (data.userProfile && data.userProfile.payment_status !== "paid") {
-    if (data.isLifetimeActive) {
-      await chrome.storage.local.set({ isLifetimeActive: false });
-      data.isLifetimeActive = false;
-    }
-  }
-
-  if (data.isLifetimeActive === true) {
     return {
       status: "LIFETIME_ACTIVE",
       isLifetime: true,

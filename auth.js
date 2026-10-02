@@ -328,46 +328,79 @@ async function validateSessionOnServer(session) {
 async function getUserProfile(accessToken, userId) {
   if (!userId) return null;
 
+  const token = accessToken || AUTH_CONFIG.supabaseAnonKey;
+  const headers = {
+    "apikey": AUTH_CONFIG.supabaseAnonKey,
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json"
+  };
+
+  // 1. Try atomic SECURITY DEFINER RPC (bypasses RLS issues)
   try {
-    const token = accessToken || AUTH_CONFIG.supabaseAnonKey;
-    const profiles = await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${userId}&select=*`, {
-      headers: {
-        "apikey": AUTH_CONFIG.supabaseAnonKey,
-        "Authorization": `Bearer ${token}`
+    const rpcRes = await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/rpc/get_user_profile`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ p_user_id: userId })
+    });
+    if (rpcRes.ok) {
+      const rpcProfile = await rpcRes.json();
+      if (rpcProfile && typeof rpcProfile === "object" && rpcProfile.id) {
+        await chrome.storage.local.set({ userProfile: rpcProfile });
+        return rpcProfile;
       }
+    }
+  } catch (_) {}
+
+  // 2. Fallback to standard REST query
+  try {
+    const profiles = await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${userId}&select=*`, {
+      headers
     }).then(r => r.json());
 
     if (Array.isArray(profiles) && profiles.length > 0) {
       await chrome.storage.local.set({ userProfile: profiles[0] });
       return profiles[0];
     }
-    return null;
   } catch (err) {
     console.warn("[Auth] Failed to fetch user profile:", err.message);
-    return null;
   }
+
+  // 3. Fallback to locally cached userProfile if available
+  try {
+    const local = await chrome.storage.local.get(["userProfile"]);
+    if (local.userProfile && local.userProfile.id === userId) {
+      return local.userProfile;
+    }
+  } catch (_) {}
+
+  return null;
 }
 
 async function syncUserProfile(session) {
   if (!session?.user?.id) return null;
 
-  const profile = await getUserProfile(session.access_token, session.user.id);
+  const stored = await getStoredSession();
+  const token = stored?.access_token || session.access_token || AUTH_CONFIG.supabaseAnonKey;
+  const userId = stored?.user?.id || session.user.id;
+
+  const profile = await getUserProfile(token, userId);
   if (!profile) return null;
 
-  // 1. Sync Lifetime Payment Status with Server DB (Bidirectional)
+  // 1. Sync Lifetime Payment Status with Server DB
   if (profile.payment_status === "paid") {
     await chrome.storage.local.set({
       isLifetimeActive: true,
-      lifetimeActivatedAt: profile.paid_at ? new Date(profile.paid_at).getTime() : Date.now()
+      lifetimeActivatedAt: profile.paid_at ? new Date(profile.paid_at).getTime() : Date.now(),
+      userProfile: profile
     });
   } else {
     // Database profile is unpaid, refunded, or revoked
     await chrome.storage.local.set({
-      isLifetimeActive: false
+      isLifetimeActive: false,
+      userProfile: profile
     });
   }
 
-  const token = session.access_token || AUTH_CONFIG.supabaseAnonKey;
   const authHeaders = {
     "apikey": AUTH_CONFIG.supabaseAnonKey,
     "Authorization": `Bearer ${token}`,
@@ -377,23 +410,28 @@ async function syncUserProfile(session) {
   // 2. Sync Trial Start Timestamp (Starts on first login after email confirmation)
   if (profile.trial_started_at) {
     const serverTrialMs = new Date(profile.trial_started_at).getTime();
-    if (!isNaN(serverTrialMs)) {
+    if (!isNaN(serverTrialMs) && serverTrialMs > 0) {
       await chrome.storage.local.set({
         trialStartedAt: serverTrialMs
       });
     }
   } else {
-    // User is logged in with confirmed email, but has no trial_started_at yet.
-    // This is their FIRST login after email confirmation -> Start 30-min trial now!
-    const trialMs = Date.now();
+    // User is logged in with confirmed email, but server has no trial_started_at yet.
+    // Check if trial was ALREADY started locally so we DO NOT reset countdown on refresh!
+    const local = await chrome.storage.local.get(["trialStartedAt"]);
+    let trialMs;
+    if (typeof local.trialStartedAt === "number" && !isNaN(local.trialStartedAt) && local.trialStartedAt > 0) {
+      trialMs = local.trialStartedAt;
+    } else {
+      trialMs = Date.now();
+      await chrome.storage.local.set({ trialStartedAt: trialMs });
+    }
+
     const isoDate = new Date(trialMs).toISOString();
     profile.trial_started_at = isoDate;
-    await chrome.storage.local.set({
-      trialStartedAt: trialMs
-    });
 
-    // Update server profile with initial trial start date
-    fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
+    // Update server profile with initial trial start date (non-blocking)
+    fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
       method: "PATCH",
       headers: authHeaders,
       body: JSON.stringify({ trial_started_at: isoDate, last_active_at: isoDate })
@@ -786,6 +824,13 @@ async function checkManualPaymentStatus() {
   }
 
   const isPaid = profile.payment_status === "paid";
+  if (isPaid) {
+    await chrome.storage.local.set({
+      isLifetimeActive: true,
+      lifetimeActivatedAt: profile.paid_at ? new Date(profile.paid_at).getTime() : Date.now(),
+      userProfile: profile
+    });
+  }
   return {
     isPaid,
     paymentStatus: profile.payment_status || "unpaid",
