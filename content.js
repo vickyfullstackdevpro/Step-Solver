@@ -2505,6 +2505,19 @@
       return isElementVisible(el);
     });
 
+    const isStartMatch = (rawTxt, el) => {
+      const txt = (rawTxt || "").toLowerCase().trim();
+      if (txt === "restart" || txt.includes("restart")) return false;
+      if (/^(start|start\s+test|start\s+assessment|start\s+quiz|start\s+now|begin|begin\s+test)$/i.test(txt)) return true;
+      if (/^start\b/i.test(txt) && !txt.includes("option") && !txt.includes("question 1 of")) return true;
+      if (/^begin\b/i.test(txt)) return true;
+      const cls = (el.className || "").toString().toLowerCase();
+      if ((cls.includes("start-btn") || cls.includes("btn-start")) && !txt.includes("restart")) return true;
+      const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+      if (/^start\b/i.test(aria) && !aria.includes("restart")) return true;
+      return false;
+    };
+
     const isSubmitMatch = (rawTxt, el) => {
       const txt = (rawTxt || "").toLowerCase().trim();
       if (txt === "submitted" || txt.includes("already submitted") || txt.includes("feedback")) return false;
@@ -2524,11 +2537,18 @@
       const cls = (el.className || "").toString().toLowerCase();
       if ((cls.includes("next-btn") || cls.includes("btn-next")) && !txt.includes("submit")) return true;
       const aria = (el.getAttribute("aria-label") || "").toLowerCase();
-      if (/^next\b/i.test(aria)) return true;
+      if (/^(next|continue|proceed)\b/i.test(aria)) return true;
       return false;
     };
 
-    const matcher = actionType === "submit" ? isSubmitMatch : isNextMatch;
+    let matcher;
+    if (actionType === "start") {
+      matcher = isStartMatch;
+    } else if (actionType === "submit") {
+      matcher = isSubmitMatch;
+    } else {
+      matcher = isNextMatch;
+    }
 
     for (const el of candidates) {
       const txt = safeText(el);
@@ -2568,16 +2588,41 @@
   }
 
   // -------------------------------------------------------------
-  // Auto-Submit & Auto-Next Execution Controllers
+  // Auto-Submit, Auto-Start & Auto-Next Execution Controllers
   // -------------------------------------------------------------
   let autoNextTimer = null;
   let isAutoNextClicking = false;
+  let isAutoStartClicking = false;
   let answerWatcherTimer = null;
+
+  async function handleAutoStart() {
+    if (!state.isEnabled || !state.autoSubmitEnabled || isAutoStartClicking) return;
+    const startBtn = findActionElement("start");
+    if (startBtn && !isButtonDisabled(startBtn)) {
+      isAutoStartClicking = true;
+      console.log("[Step Solver] Start button detected on test page. Auto-clicking Start...");
+      showToast("Auto-starting test...");
+      updateStatus("Starting...", "working", "START");
+      await delay(400);
+      simulateClick(startBtn);
+      await delay(1200);
+      isAutoStartClicking = false;
+    }
+  }
 
   function ensureAnswerPageWatcher() {
     if (answerWatcherTimer) return;
     answerWatcherTimer = setInterval(() => {
       if (!state.isEnabled || !state.autoSubmitEnabled) return;
+
+      // 1. Check if Start button is present (test launch/intro page)
+      const startBtn = findActionElement("start");
+      if (startBtn && !isButtonDisabled(startBtn) && !isAutoStartClicking) {
+        handleAutoStart();
+        return;
+      }
+
+      // 2. Check if Answer or Feedback page is active (Next / Continue)
       if (isAnswerOrFeedbackPage() && !autoNextTimer && !isAutoNextClicking) {
         handleAutoNext();
       }
@@ -2597,7 +2642,7 @@
       if (!state.autoSubmitEnabled || isAutoNextClicking) return;
       if (!isAnswerOrFeedbackPage()) return;
 
-      const nextBtn = findActionElement("next");
+      let nextBtn = findActionElement("next") || findActionElement("start");
       if (nextBtn && !isButtonDisabled(nextBtn)) {
         isAutoNextClicking = true;
         console.log("[Step Solver] Auto-Next (2s elapsed): Clicking 'Next' on Answer page...");
@@ -2631,7 +2676,7 @@
       return;
     }
 
-    const submitBtn = findActionElement("submit");
+    let submitBtn = findActionElement("submit") || findActionElement("next") || findActionElement("start");
     if (!submitBtn) {
       console.warn("[Step Solver] Auto-Submit: Submit button not found on question page.");
       return;
