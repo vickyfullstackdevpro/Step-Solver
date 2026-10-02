@@ -9,3 +9,4 @@ desktop.ini
 # Build & Store Archives
 *.zip
 releases/
+node_modules/

@@ -1,0 +1,14 @@
+{
+  "name": "step-solver-extension",
+  "version": "1.0.4",
+  "description": "Step Solver Chrome & Edge Extension with automated regression testing",
+  "main": "background.js",
+  "scripts": {
+    "test": "node --test test/**/*.test.js",
+    "verify": "node scripts/verify.js",
+    "package": "node scripts/package.js"
+  },
+  "keywords": ["extension", "step-solver", "gemini-ai"],
+  "author": "",
+  "license": "ISC"
+}
