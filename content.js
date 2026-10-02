@@ -15,6 +15,7 @@
     isEnabled: true,
     isAutoWatch: false,
     isProcessing: false,
+    inFlightQuestionId: null,
     answerPopupEnabled: true,
     autoSubmitEnabled: false,
     autoPlayVideoEnabled: true,
@@ -710,6 +711,16 @@
     if (hasFeedbackKeywords) return true;
 
     // 3. Button comparison: Next button present AND Submit button absent OR disabled
+    // CRITICAL: An active question page with interactive options or inputs waiting to be answered
+    // is NEVER an answer/feedback page, even if the Submit button is temporarily disabled.
+    const hasUnansweredQuestionElements = Array.from(
+      document.querySelectorAll("input[type='radio'], input[type='checkbox'], [role='radio'], [class*='option' i], [class*='choice' i], [class*='chip' i], [class*='token' i]")
+    ).some(el => isElementVisible(el) && !el.closest("#gemini-live-host, #gemini-answer-banner"));
+
+    if (hasUnansweredQuestionElements) {
+      return false;
+    }
+
     const submitBtn = findActionElement("submit");
     if (!submitBtn) return true;
     if (isButtonDisabled(submitBtn)) return true;
@@ -1640,6 +1651,36 @@
       const allPicked = data.domReferences.dropdowns.every(d => d.element && d.element.value !== "" && d.element.selectedIndex > 0);
       if (allPicked && data.domReferences.dropdowns.length > 0) return true;
     }
+
+    return false;
+  }
+
+  function hasAnyAnswerSelectedInDOM(container) {
+    const scope = (container && container !== document.body) ? container : document.body;
+
+    // 1. Radio / Checkbox inputs
+    const inputs = Array.from(scope.querySelectorAll("input[type='radio'], input[type='checkbox']"));
+    if (inputs.some(inp => inp.checked)) return true;
+
+    // 2. Selected classes or aria-checked
+    const selectedElements = Array.from(scope.querySelectorAll(
+      "[class*='selected' i], [class*='checked' i], [class*='active' i], [aria-checked='true']"
+    )).filter(el => isElementVisible(el) && !el.closest("#gemini-live-host, #gemini-answer-banner"));
+    if (selectedElements.length > 0) return true;
+
+    // 3. Placed cloze or rearrange chips/slots
+    const placedChips = Array.from(scope.querySelectorAll(
+      "[class*='blank' i] [class*='chip' i], [class*='slot' i] [class*='chip' i], [class*='slot' i] [class*='token' i]"
+    )).filter(isElementVisible);
+    if (placedChips.length > 0) return true;
+
+    // 4. Populated text inputs
+    const textInputs = Array.from(scope.querySelectorAll("input[type='text'], textarea:not(.gemini-input)")).filter(isElementVisible);
+    if (textInputs.some(inp => (inp.value || "").trim().length > 0)) return true;
+
+    // 5. Selected dropdowns
+    const dropdowns = Array.from(scope.querySelectorAll("select")).filter(isElementVisible);
+    if (dropdowns.some(sel => sel.selectedIndex > 0 && sel.value !== "")) return true;
 
     return false;
   }
@@ -2666,6 +2707,13 @@
       return;
     }
 
+    // Strict Guard: Ensure the question has at least one answer selected in the DOM before submitting
+    const activeContainer = findActiveQuestionContainer();
+    if (activeContainer && !hasAnyAnswerSelectedInDOM(activeContainer)) {
+      console.warn("[Step Solver] Auto-Submit blocked: No answer or blank is populated in DOM.");
+      return;
+    }
+
     // Natural pacing delay so the user/UI confirms the selection before submission
     const pacingDelay = Math.max(700, (state.typingDelayMs || 250) + 400);
     await delay(pacingDelay);
@@ -2973,6 +3021,81 @@
   }
 
   // -------------------------------------------------------------
+  // Exceptional Question Fallback Filler (Auto-Submit Enabled Only)
+  // For Fill in the Blanks (Cloze) and Rearrange Sentence (ABCD)
+  // -------------------------------------------------------------
+  async function fillExceptionalQuestionFallback(data, container, targetType) {
+    if (!state.autoSubmitEnabled) return { success: false, clickedCount: 0 };
+
+    const scope = (container && container !== document.body) ? container : document.body;
+    let placedCount = 0;
+
+    const isCloze = targetType === "cloze_passage" || data?.type === "cloze_passage" || checkIsClozePassage(scope);
+    const isRearrange = targetType === "rearrange_sentence" || data?.type === "rearrange_sentence" || checkIsRearrangeQuestion(scope);
+
+    if (isCloze) {
+      console.log("[Step Solver] Executing Auto-Submit Cloze fallback fill...");
+      const liveBlanks = findClozeBlanks(scope);
+      const liveChips = findClozeChips(scope);
+
+      if (liveChips.length > 0) {
+        for (let i = 0; i < Math.max(liveBlanks.length, 1); i++) {
+          const blank = liveBlanks[i];
+          const chip = liveChips[i % liveChips.length];
+          if (chip && chip.element) {
+            if (blank && isElementVisible(blank)) {
+              try { simulateClick(blank); await delay(80); } catch (_) {}
+            }
+            simulateClick(chip.element);
+            if (blank && (blank.tagName === "INPUT" || blank.isContentEditable)) {
+              setElementValue(blank, chip.text || "answer");
+            }
+            placedCount++;
+            await delay(Math.max(150, state.typingDelayMs || 250));
+          }
+        }
+      }
+
+      // If text inputs remain empty in cloze, populate fallback
+      const textInputs = Array.from(scope.querySelectorAll("input[type='text']:not(.gemini-input), input:not([type])")).filter(isElementVisible);
+      for (const inp of textInputs) {
+        if (!inp.value || inp.value.trim().length === 0) {
+          const fallbackVal = liveChips.length > 0 ? liveChips[placedCount % liveChips.length].text : "answer";
+          setElementValue(inp, fallbackVal);
+          placedCount++;
+          await delay(100);
+        }
+      }
+    } else if (isRearrange) {
+      console.log("[Step Solver] Executing Auto-Submit Rearrange fallback fill...");
+      let tokens = findRearrangeTokens(scope);
+      if (!tokens || tokens.length === 0) {
+        tokens = findRearrangeTokens(document.body);
+      }
+
+      if (tokens && tokens.length > 0) {
+        for (const tok of tokens) {
+          if (tok && tok.element && isElementVisible(tok.element)) {
+            simulateClick(tok.element);
+            placedCount++;
+            await delay(Math.max(150, state.typingDelayMs || 250));
+          }
+        }
+      }
+    }
+
+    if (placedCount > 0) {
+      return {
+        success: true,
+        clickedCount: placedCount,
+        message: `Auto-filled ${placedCount} item(s) via fallback`
+      };
+    }
+
+    return { success: false, clickedCount: 0 };
+  }
+
+  // -------------------------------------------------------------
   // 5. Main Trigger Controller (Token-Saver Guarded)
   // -------------------------------------------------------------
   async function triggerSolve(isAutomated = false) {
@@ -3078,6 +3201,7 @@
       if (!isAutomated) {
         // User explicitly clicked "Solve Current (Alt+S)": Unblock question so it always re-solves
         state.isProcessing = false;
+        state.inFlightQuestionId = null;
         state.lastSolveTimestamp = 0;
         state.solvedQuestionIds.delete(questionId);
         if (state.lastSolvedQuestionId === questionId) {
@@ -3085,7 +3209,7 @@
         }
       } else {
         // Automated Mode:
-        if (state.lastSolvedQuestionId === questionId || state.solvedQuestionIds.has(questionId)) {
+        if (state.lastSolvedQuestionId === questionId || state.solvedQuestionIds.has(questionId) || state.inFlightQuestionId === questionId) {
           return;
         }
         if (isQuestionAlreadyAnswered(data, container, questionId)) {
@@ -3099,9 +3223,8 @@
         }
       }
 
-      // Lock this question as solved in state to prevent duplicate parallel/loop calls
-      state.lastSolvedQuestionId = questionId;
-      state.solvedQuestionIds.add(questionId);
+      // Lock in-flight solve to prevent duplicate parallel/loop calls while waiting for Gemini
+      state.inFlightQuestionId = questionId;
       state.lastSolveTimestamp = Date.now();
       state.isProcessing = true;
 
@@ -3209,19 +3332,6 @@
         }
       }
 
-      if (!isSuccess) {
-        updateStatus("Answer Not Applied", "idle", "PAUSED");
-        showToast(resultMsg || "Answer could not be verified on page.");
-        console.warn("[Gemini Live] Solver did not achieve verified click.");
-        return;
-      }
-
-      updateStatus("Done", "idle", targetType.toUpperCase());
-      showToast(resultMsg);
-
-      // CRITICAL: Auto-Submit execution logic
-      // The auto submit will click the submit button after getting the answer from Gemini and clicked on the options only.
-      // NEVER submit empty answer!
       let effectiveClickedCount = 0;
       if (solveResult && typeof solveResult === "object") {
         effectiveClickedCount = solveResult.clickedCount || (solveResult.wordCount > 0 ? 1 : 0) || 0;
@@ -3229,20 +3339,54 @@
         effectiveClickedCount = 1;
       }
 
-      if (state.autoSubmitEnabled && isSuccess) {
+      // Exceptional Question Fallback: If Cloze or Rearrange produced 0 clicked items
+      // and Auto-Submit is ON, execute the fallback fill so boxes/slots are never left empty!
+      const isExceptionalQuestion = (
+        targetType === "cloze_passage" ||
+        targetType === "rearrange_sentence" ||
+        data?.type === "cloze_passage" ||
+        data?.type === "rearrange_sentence" ||
+        checkIsClozePassage(container) ||
+        checkIsRearrangeQuestion(container)
+      );
+
+      if (state.autoSubmitEnabled && effectiveClickedCount === 0 && isExceptionalQuestion) {
+        console.log("[Step Solver] Exceptional question type had 0 clicks. Running auto-submit fallback fill...");
+        const fallbackRes = await fillExceptionalQuestionFallback(data, container, targetType);
+        if (fallbackRes && fallbackRes.success && fallbackRes.clickedCount > 0) {
+          effectiveClickedCount = fallbackRes.clickedCount;
+          isSuccess = true;
+          resultMsg = fallbackRes.message || "Filled via fallback";
+        }
+      }
+
+      if (!isSuccess || effectiveClickedCount === 0) {
+        state.isProcessing = false;
+        state.inFlightQuestionId = null;
+        updateStatus("Answer Not Applied", "idle", "PAUSED");
+        showToast(resultMsg || "Answer could not be verified on page.");
+        console.warn("[Gemini Live] Solver did not achieve verified click. Auto-submit blocked.");
+        return;
+      }
+
+      // Lock question as SOLVED ONLY after verified click / selection!
+      state.lastSolvedQuestionId = questionId;
+      state.solvedQuestionIds.add(questionId);
+      state.inFlightQuestionId = null;
+
+      updateStatus("Done", "idle", targetType.toUpperCase());
+      showToast(resultMsg);
+
+      // Auto-Submit execution logic
+      if (state.autoSubmitEnabled && isSuccess && effectiveClickedCount > 0) {
         if (isAnswerOrFeedbackPage()) {
           console.log("[Step Solver] Answer/Feedback page detected post-solve. Halting submit, triggering Auto-Next.");
           handleAutoNext();
         } else if (targetType === "speaking" && (!data.domReferences.options || data.domReferences.options.length === 0)) {
           console.log("[Step Solver] Speaking task: Auto-submit paused until user records speech.");
-        } else if (effectiveClickedCount > 0) {
+        } else {
           console.log(`[Step Solver] Auto-Submit: Verified non-empty answer (${effectiveClickedCount} item(s)). Triggering submit...`);
           await handleAutoSubmit();
-        } else {
-          console.warn("[Step Solver] Auto-submit blocked: No options were selected/filled. Empty answers are NEVER submitted.");
-          if (!isAnswerOrFeedbackPage()) {
-            showToast("Auto-Submit skipped: No option selected");
-          }
         }
       }
 
@@ -3268,6 +3412,7 @@
       }
     } finally {
       state.isProcessing = false;
+      state.inFlightQuestionId = null;
       const currentBtnSolve = document.getElementById("gemini-btn-solve");
       if (currentBtnSolve) currentBtnSolve.disabled = !state.isEnabled;
     }
