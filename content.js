@@ -18,6 +18,7 @@
     answerPopupEnabled: true,
     autoSubmitEnabled: false,
     autoPlayVideoEnabled: true,
+    autoLoopVideoEnabled: false,
     antiTabSwitchEnabled: true,
     keepWebsiteActiveEnabled: true,
     playedVideoKeys: new Set(),
@@ -46,6 +47,7 @@
       "answerPopupEnabled",
       "autoSubmitEnabled",
       "autoPlayVideoEnabled",
+      "autoLoopVideoEnabled",
       "antiTabSwitchEnabled",
       "keepWebsiteActiveEnabled"
     ]);
@@ -66,6 +68,9 @@
     }
     if (stored.autoPlayVideoEnabled !== undefined) {
       state.autoPlayVideoEnabled = stored.autoPlayVideoEnabled;
+    }
+    if (stored.autoLoopVideoEnabled !== undefined) {
+      state.autoLoopVideoEnabled = stored.autoLoopVideoEnabled;
     }
     if (stored.antiTabSwitchEnabled !== undefined) {
       state.antiTabSwitchEnabled = stored.antiTabSwitchEnabled;
@@ -2810,14 +2815,71 @@
         showToast("Auto-playing video...");
       }
     }
+
+    if (state.autoLoopVideoEnabled) {
+      applyVideoLoopSettings();
+    }
+  }
+
+  function applyVideoLoopSettings() {
+    if (!state.isEnabled) return;
+
+    // 1. HTML5 native videos
+    const html5Videos = Array.from(document.querySelectorAll("video")).filter(v => !v.closest("#gemini-live-host"));
+    for (const video of html5Videos) {
+      if (state.autoLoopVideoEnabled) {
+        video.loop = true;
+        if (!video.__hasStepLoopListener) {
+          video.__hasStepLoopListener = true;
+          video.addEventListener("ended", async () => {
+            if (state.autoLoopVideoEnabled) {
+              console.log("[Step Solver] HTML5 video ended. Auto-looping from start...");
+              try {
+                video.currentTime = 0;
+                await video.play();
+              } catch (_) {
+                video.muted = true;
+                await video.play().catch(() => {});
+                setTimeout(() => { video.muted = false; }, 400);
+              }
+            }
+          });
+        }
+      } else {
+        video.loop = false;
+      }
+    }
+
+    // 2. YouTube iframes
+    if (state.autoLoopVideoEnabled) {
+      const iframes = Array.from(document.querySelectorAll("iframe")).filter(f => {
+        if (!isElementVisible(f) || f.closest("#gemini-live-host")) return false;
+        const s = (f.src || "").toLowerCase();
+        return s.includes("youtube.com") || s.includes("youtube-nocookie.com") || s.includes("youtu.be");
+      });
+      for (const iframe of iframes) {
+        try {
+          const ytid = getYouTubeVideoKey(iframe)?.replace("yt_", "");
+          if (ytid && iframe.src && !iframe.src.includes("loop=1")) {
+            const sep = iframe.src.includes("?") ? "&" : "?";
+            iframe.src = `${iframe.src}${sep}loop=1&playlist=${ytid}`;
+          }
+        } catch (_) {}
+      }
+    }
   }
 
   let videoWatcherInterval = null;
   function ensureVideoWatcher() {
     if (videoWatcherInterval) return;
     videoWatcherInterval = setInterval(() => {
-      if (!state.isEnabled || !state.autoPlayVideoEnabled) return;
-      handleAutoPlayVideo();
+      if (!state.isEnabled || (!state.autoPlayVideoEnabled && !state.autoLoopVideoEnabled)) return;
+      if (state.autoPlayVideoEnabled) {
+        handleAutoPlayVideo();
+      }
+      if (state.autoLoopVideoEnabled) {
+        applyVideoLoopSettings();
+      }
     }, 1500);
   }
 
@@ -3232,6 +3294,10 @@
         handleAutoPlayVideo();
       }
       sendResponse({ autoPlayVideoEnabled: state.autoPlayVideoEnabled });
+    } else if (msg.action === "AUTO_LOOP_VIDEO_TOGGLED") {
+      state.autoLoopVideoEnabled = msg.enabled;
+      applyVideoLoopSettings();
+      sendResponse({ autoLoopVideoEnabled: state.autoLoopVideoEnabled });
     } else if (msg.action === "ANTI_TAB_SWITCH_TOGGLED") {
       state.antiTabSwitchEnabled = msg.enabled;
       syncProtectionSettings();
@@ -3267,6 +3333,10 @@
         if (state.autoPlayVideoEnabled) {
           handleAutoPlayVideo();
         }
+      }
+      if (changes.autoLoopVideoEnabled !== undefined) {
+        state.autoLoopVideoEnabled = changes.autoLoopVideoEnabled.newValue;
+        applyVideoLoopSettings();
       }
       if (changes.antiTabSwitchEnabled !== undefined) {
         state.antiTabSwitchEnabled = changes.antiTabSwitchEnabled.newValue;
