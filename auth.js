@@ -99,13 +99,8 @@ async function authSignUp(email, password, fullName = "") {
 
   const userId = data.id || data.user?.id;
 
-  // 2. Ensure profile row exists in public.profiles table with device & trial info
+  // 2. Ensure profile row exists in public.profiles table with device info
   if (userId) {
-    // Check if this device already has an active trial timestamp to continue from
-    const local = await chrome.storage.local.get(["trialStartedAt", "deviceTrialStartedAt"]);
-    const activeTrialMs = local.trialStartedAt || local.deviceTrialStartedAt || Date.now();
-    const activeTrialIso = new Date(activeTrialMs).toISOString();
-
     try {
       await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles`, {
         method: "POST",
@@ -120,7 +115,7 @@ async function authSignUp(email, password, fullName = "") {
           email: cleanEmail,
           full_name: cleanName,
           payment_status: "unpaid",
-          trial_started_at: activeTrialIso,
+          trial_started_at: null, // Free trial activates on first login after email confirmation
           current_device_id: deviceId,
           last_device_name: deviceName,
           last_active_at: nowIso
@@ -137,25 +132,26 @@ async function authSignUp(email, password, fullName = "") {
       console.warn("[Auth] Device session initialization notice:", err.message);
     }
 
-    // 4. Initialize continuous 30-minute trial and user profile in storage
+    // 4. Initialize user profile in storage (trial starts on first confirmed login)
     await chrome.storage.local.set({
-      trialStartedAt: activeTrialMs,
-      deviceTrialStartedAt: activeTrialMs,
       userProfile: {
         id: userId,
         email: cleanEmail,
         full_name: cleanName,
         payment_status: "unpaid",
-        trial_started_at: activeTrialIso,
+        trial_started_at: null,
         current_device_id: deviceId,
         last_device_name: deviceName
       }
     });
 
-    // 5. If session was returned immediately (e.g. auto-confirmed or active session)
+    // 5. If session was returned immediately with confirmed email (e.g. auto-confirmed)
     if (data.session || data.access_token) {
-      await saveSession(data.session || data);
-      await syncUserProfile(data.session || data);
+      const authUser = data.user || data.session?.user;
+      if (authUser && (authUser.email_confirmed_at || authUser.confirmed_at)) {
+        await saveSession(data.session || data);
+        await syncUserProfile(data.session || data);
+      }
     }
   }
 
@@ -233,12 +229,14 @@ async function authSignOut() {
     }
   }
 
-  // Clear local session and access flags, but retain extensionDeviceId and continuous trial tracking
+  // Clear local session and access flags, but retain extensionDeviceId
   await chrome.storage.local.remove([
     "supabaseSession",
     "isLoggedIn",
     "userProfile",
-    "isLifetimeActive"
+    "isLifetimeActive",
+    "trialStartedAt",
+    "deviceTrialStartedAt"
   ]);
 
   return { success: true };
@@ -357,32 +355,32 @@ async function syncUserProfile(session) {
     "Content-Type": "application/json"
   };
 
-  // 2. Sync Trial Start Timestamp (Server authoritative & non-resetting)
+  // 2. Sync Trial Start Timestamp (Starts on first login after email confirmation)
   if (profile.trial_started_at) {
     const serverTrialMs = new Date(profile.trial_started_at).getTime();
     if (!isNaN(serverTrialMs)) {
       await chrome.storage.local.set({
-        trialStartedAt: serverTrialMs,
-        deviceTrialStartedAt: serverTrialMs
+        trialStartedAt: serverTrialMs
       });
     }
   } else {
-    // If not set on server, continue from device trial start if available, or set now
-    const local = await chrome.storage.local.get(["trialStartedAt", "deviceTrialStartedAt"]);
-    const trialMs = local.trialStartedAt || local.deviceTrialStartedAt || Date.now();
+    // User is logged in with confirmed email, but has no trial_started_at yet.
+    // This is their FIRST login after email confirmation -> Start 30-min trial now!
+    const trialMs = Date.now();
     const isoDate = new Date(trialMs).toISOString();
     profile.trial_started_at = isoDate;
     await chrome.storage.local.set({
-      trialStartedAt: trialMs,
-      deviceTrialStartedAt: trialMs
+      trialStartedAt: trialMs
     });
 
     // Update server profile with initial trial start date
     fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
       method: "PATCH",
       headers: authHeaders,
-      body: JSON.stringify({ trial_started_at: isoDate, last_active_at: new Date().toISOString() })
-    }).catch(() => {});
+      body: JSON.stringify({ trial_started_at: isoDate, last_active_at: isoDate })
+    }).catch((err) => {
+      console.warn("[Auth] Failed to set initial trial_started_at on server:", err.message);
+    });
   }
 
   await chrome.storage.local.set({ userProfile: profile });

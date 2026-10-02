@@ -8,12 +8,9 @@ const BURNT_KEY = "AQ.Ab8RN6I1C1o7hEEyqfwMJUFw1TdSg-kRieVIS06703505QTCrQ";
 const TRIAL_DURATION_MS = 30 * 60 * 1000; // 30 minutes in milliseconds
 const LIFETIME_PURCHASE_URL = "https://vignesh-fullstackdev-portfolio.vercel.app/";
 
-// Initialize trial timestamp upon first installation
+// On installation, do not start trial countdown; free trial starts on first login after email confirmation
 chrome.runtime.onInstalled.addListener(async () => {
-  const data = await chrome.storage.local.get(["trialStartedAt", "isLifetimeActive"]);
-  if (!data.trialStartedAt && !data.isLifetimeActive) {
-    await chrome.storage.local.set({ trialStartedAt: Date.now() });
-  }
+  // Retain clean initialization without prematurely starting trial countdown
 });
 
 // Listen for messages from popup or content scripts
@@ -1085,27 +1082,73 @@ async function getSubscriptionStatus() {
   }
 
   const now = Date.now();
-  let trialStartedAt = data.trialStartedAt || data.deviceTrialStartedAt;
+  let trialStartedAt = null;
 
-  // If server profile has trial_started_at, prioritize server timestamp
+  // Prioritize server profile trial_started_at
   if (data.userProfile && data.userProfile.trial_started_at) {
     const serverMs = new Date(data.userProfile.trial_started_at).getTime();
     if (!isNaN(serverMs)) {
       trialStartedAt = serverMs;
     }
+  } else if (data.trialStartedAt && typeof data.trialStartedAt === "number") {
+    trialStartedAt = data.trialStartedAt;
   }
 
-  // Initialize trial timestamp on first query if not present
-  if (!trialStartedAt || typeof trialStartedAt !== "number") {
-    trialStartedAt = now;
-    await chrome.storage.local.set({ trialStartedAt, deviceTrialStartedAt: now });
+  let elapsedMs = 0;
+  let remainingMs = TRIAL_DURATION_MS;
+  let remainingMinutes = 30;
+  let remainingSeconds = 1800;
+  let isTrialExpired = false;
+
+  if (trialStartedAt) {
+    elapsedMs = now - trialStartedAt;
+    remainingMs = Math.max(0, TRIAL_DURATION_MS - elapsedMs);
+    remainingMinutes = Math.ceil(remainingMs / 60000);
+    remainingSeconds = Math.ceil(remainingMs / 1000);
+    isTrialExpired = remainingMs <= 0;
+  } else {
+    // Trial has not started yet (starts on first login after email confirmation)
+    elapsedMs = 0;
+    remainingMs = TRIAL_DURATION_MS;
+    remainingMinutes = Math.ceil(TRIAL_DURATION_MS / 60000);
+    remainingSeconds = Math.ceil(TRIAL_DURATION_MS / 1000);
+    isTrialExpired = false;
   }
 
-  const elapsedMs = now - trialStartedAt;
-  const remainingMs = Math.max(0, TRIAL_DURATION_MS - elapsedMs);
-  const remainingMinutes = Math.ceil(remainingMs / 60000);
-  const remainingSeconds = Math.ceil(remainingMs / 1000);
-  const isTrialExpired = remainingMs <= 0;
+  // -------------------------------------------------------------
+  // [Trial Diagnostic Logs] - Root cause validation
+  // -------------------------------------------------------------
+  const trialSource = (data.userProfile && data.userProfile.trial_started_at)
+    ? "supabase_server_profile"
+    : (data.trialStartedAt ? "chrome_storage_local" : "not_started_yet");
+
+  console.log("[Subscription/Trial Diagnostics]", {
+    timestamp: new Date().toISOString(),
+    evalTimeMs: now,
+    account: {
+      email: data.userProfile?.email || "anonymous_or_unauthenticated",
+      userId: data.userProfile?.id || null,
+      paymentStatus: data.userProfile?.payment_status || "unpaid",
+      isLifetimeActive: !!data.isLifetimeActive
+    },
+    rawTimestamps: {
+      localTrialStartedAt: data.trialStartedAt ? new Date(data.trialStartedAt).toISOString() : null,
+      deviceTrialStartedAt: data.deviceTrialStartedAt ? new Date(data.deviceTrialStartedAt).toISOString() : null,
+      serverTrialStartedAt: data.userProfile?.trial_started_at || null
+    },
+    resolution: {
+      sourceUsed: trialSource,
+      trialStarted: !!trialStartedAt,
+      effectiveTrialStartedAtIso: trialStartedAt ? new Date(trialStartedAt).toISOString() : "NOT_STARTED_YET",
+      effectiveTrialStartedAtMs: trialStartedAt,
+      elapsedMs,
+      elapsedMinutes: Number((elapsedMs / 60000).toFixed(2)),
+      trialDurationMinutes: TRIAL_DURATION_MS / 60000,
+      remainingMinutes,
+      remainingSeconds,
+      isTrialExpired
+    }
+  });
 
   // If trial has expired and user has not paid for Lifetime, automatically turn off all features
   if (isTrialExpired && !data.isLifetimeActive && data.userProfile?.payment_status !== "paid") {
@@ -1149,9 +1192,10 @@ async function getSubscriptionStatus() {
   }
 
   return {
-    status: isTrialExpired ? "TRIAL_EXPIRED" : "TRIAL_ACTIVE",
+    status: isTrialExpired ? "TRIAL_EXPIRED" : (trialStartedAt ? "TRIAL_ACTIVE" : "TRIAL_NOT_STARTED"),
     isLifetime: false,
     isTrialExpired,
+    trialStarted: !!trialStartedAt,
     trialStartedAt,
     elapsedMs,
     remainingMs,
@@ -1160,5 +1204,5 @@ async function getSubscriptionStatus() {
     purchaseUrl: LIFETIME_PURCHASE_URL
   };
 }
-
-
+// Function alias to support checkSubscriptionStatus terminology
+const checkSubscriptionStatus = getSubscriptionStatus;
