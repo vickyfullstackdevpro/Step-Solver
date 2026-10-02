@@ -121,8 +121,12 @@
   function triggerNativePlay(video) {
     if (!video) return;
 
-    // 1. Click native YouTube play button / thumbnail overlay
+    // 1. Click native YouTube play button / thumbnail overlay & invoke player API
     try {
+      const moviePlayer = document.getElementById("movie_player");
+      if (moviePlayer && typeof moviePlayer.playVideo === "function") {
+        moviePlayer.playVideo();
+      }
       const playBtn = document.querySelector(".ytp-large-play-button, .ytp-play-button, .ytp-cued-thumbnail-overlay");
       if (playBtn) clickElement(playBtn);
     } catch (_) {}

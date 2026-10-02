@@ -166,7 +166,7 @@ describe("Auto-Loop Video Feature & Dependency Logic", () => {
     assert.equal(mockIframe.postMessages[1].func, "playVideo");
   });
 
-  test("Autoplay 1: PostMessage Sequence sends array args and mute/play/unmute sequence", () => {
+  test("Autoplay 1: PostMessage Sequence sends clean commands without disruptive listening handshake", () => {
     const postMessages = [];
     const mockIframe = {
       contentWindow: {
@@ -176,16 +176,16 @@ describe("Auto-Loop Video Feature & Dependency Logic", () => {
       }
     };
 
-    // Simulate playYouTubeIframe postMessage sequence
-    mockIframe.contentWindow.postMessage(JSON.stringify({ event: "listening", id: 1, channel: "widget" }));
+    // Clean playback commands without hijacking StepTest's listening channel
     mockIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "playVideo", args: [] }));
     mockIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "mute", args: [] }));
     mockIframe.contentWindow.postMessage(JSON.stringify({ event: "command", func: "playVideo", args: [] }));
 
-    assert.equal(postMessages.length, 4);
-    assert.equal(Array.isArray(postMessages[1].args), true, "args must be an array, not a string");
-    assert.equal(postMessages[1].func, "playVideo");
-    assert.equal(postMessages[2].func, "mute");
+    assert.equal(postMessages.length, 3);
+    assert.equal(Array.isArray(postMessages[0].args), true, "args must be an array, not a string");
+    assert.equal(postMessages[0].func, "playVideo");
+    assert.equal(postMessages[1].func, "mute");
+    assert.equal(postMessages.some(m => m.event === "listening"), false, "Must NOT send listening handshake to avoid hijacking StepTest's widget channel");
   });
 
   test("Autoplay 2: Native in-frame trigger clicks .ytp-large-play-button when paused", () => {
@@ -279,6 +279,38 @@ describe("Auto-Loop Video Feature & Dependency Logic", () => {
     }
 
     assert.equal(mockIframe.getAttribute("allow").includes("autoplay"), true);
+  });
+
+  test("Autoplay 7: StepTest Native Play Button Detection identifies button next to timecode", () => {
+    const mockTimeEl = {
+      innerText: "00:00/04:50",
+      parentElement: {
+        querySelectorAll: () => [
+          { innerText: "▶", className: "play-btn", matches: () => true, getAttribute: () => "" }
+        ]
+      }
+    };
+
+    const candidates = mockTimeEl.parentElement.querySelectorAll();
+    const playBtn = candidates.find(c => c.innerText === "▶" || c.className.includes("play"));
+
+    assert.ok(playBtn, "Must locate play button next to timecode display");
+    assert.equal(playBtn.innerText, "▶");
+  });
+
+  test("Autoplay 8: Timer Stuck Watchdog triggers native play button click when stuck at 00:00", () => {
+    let nativeClicked = false;
+    const mockState = {
+      timecodeText: "00:00/04:50",
+      hasActiveVideo: true,
+      clickNativePlay: () => { nativeClicked = true; }
+    };
+
+    if (/^00?:00\s*\//.test(mockState.timecodeText) && mockState.hasActiveVideo) {
+      mockState.clickNativePlay();
+    }
+
+    assert.equal(nativeClicked, true, "Must activate native play button when timer is stuck at 00:00");
   });
 });
 

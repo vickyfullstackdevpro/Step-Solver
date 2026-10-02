@@ -2843,6 +2843,67 @@
     window.addEventListener("keydown", handleGesture, { capture: true, passive: true });
   }
 
+  function findStepTestTimecodeElement() {
+    try {
+      const allEls = Array.from(document.querySelectorAll("span, div, p, [class*='time' i], [class*='duration' i], [class*='timer' i]"));
+      for (const el of allEls) {
+        if (el.children.length > 2 || el.closest("#gemini-live-host, #steptest-ai-banner")) continue;
+        const txt = (el.innerText || el.textContent || "").trim();
+        if (/\b\d{1,2}:\d{2}\s*\/\s*\d{1,2}:\d{2}\b/.test(txt)) {
+          return el;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function findStepTestNativePlayButton() {
+    try {
+      // 1. Check relative to timecode element (e.g. 00:00/04:50)
+      const timeEl = findStepTestTimecodeElement();
+      if (timeEl) {
+        const parent = timeEl.parentElement;
+        if (parent) {
+          const candidates = Array.from(parent.querySelectorAll("button, a, div[role='button'], span[role='button'], [class*='play' i], svg, i, span"));
+          for (const c of candidates) {
+            if (c === timeEl || timeEl.contains(c) || isNavOrSystem(c)) continue;
+            const txt = (c.innerText || c.textContent || "").trim();
+            const cls = (c.className || "").toString().toLowerCase();
+            const aria = (c.getAttribute("aria-label") || "").toLowerCase();
+            const title = (c.getAttribute("title") || "").toLowerCase();
+            if (
+              txt === "▶" || txt === "\u25B6" || txt.toLowerCase().includes("play") ||
+              cls.includes("play") || aria.includes("play") || title.includes("play") ||
+              c.matches("button, [role='button'], .vjs-play-control, .play-btn")
+            ) {
+              // Ensure it is not a pause button
+              if (!txt.includes("❚") && !cls.includes("pause") && !aria.includes("pause")) {
+                return c;
+              }
+            }
+          }
+        }
+      }
+
+      // 2. Global controls bar search
+      const controlsContainers = Array.from(document.querySelectorAll(
+        ".video-controls, .player-controls, .controls-bar, .vjs-control-bar, [class*='control' i], [class*='player' i], [class*='video' i]"
+      )).filter(el => isElementVisible(el) && !el.closest("#gemini-live-host, #steptest-ai-banner"));
+
+      for (const container of controlsContainers) {
+        const btn = container.querySelector(".vjs-play-control, .vjs-big-play-button, .play-btn, button[class*='play' i], [aria-label*='play' i]");
+        if (btn && isElementVisible(btn)) return btn;
+
+        const playIcons = Array.from(container.querySelectorAll("button, div[role='button'], span, svg, i")).filter(el => {
+          const t = (el.innerText || el.textContent || "").trim();
+          return t === "▶" || t === "\u25B6";
+        });
+        if (playIcons.length > 0 && isElementVisible(playIcons[0])) return playIcons[0];
+      }
+    } catch (_) {}
+    return null;
+  }
+
   function playYouTubeIframe(iframe) {
     if (!iframe || !iframe.contentWindow) return;
 
@@ -2854,32 +2915,26 @@
       }
     } catch (_) {}
 
+    // 2. Play commands (Do NOT send "listening" handshake to avoid hijacking StepTest's event channel)
     try {
-      // 2. Handshake
-      iframe.contentWindow.postMessage(JSON.stringify({
-        event: "listening",
-        id: iframe.id || 1,
-        channel: "widget"
-      }), "*");
-
-      // 3. Play command with correct args array
       iframe.contentWindow.postMessage(JSON.stringify({
         event: "command",
         func: "playVideo",
         args: []
       }), "*");
 
-      // 4. Autoplay policy bypass sequence (mute -> play -> unmute)
       iframe.contentWindow.postMessage(JSON.stringify({
         event: "command",
         func: "mute",
         args: []
       }), "*");
+
       iframe.contentWindow.postMessage(JSON.stringify({
         event: "command",
         func: "playVideo",
         args: []
       }), "*");
+
       setTimeout(() => {
         try {
           iframe.contentWindow.postMessage(JSON.stringify({
@@ -2891,11 +2946,16 @@
       }, 600);
     } catch (_) {}
 
-    // Fallback simulate click on iframe or play overlay
+    // 3. Fallback: activate StepTest's native play button or container button
     try {
-      const container = iframe.closest(".video-container, .question-video, .video-player, [class*='video' i]") || iframe.parentElement;
-      const playBtn = container?.querySelector("button, [class*='play' i], .vjs-big-play-button, .ytp-large-play-button");
-      if (playBtn) simulateClick(playBtn);
+      const nativePlayBtn = findStepTestNativePlayButton();
+      if (nativePlayBtn) {
+        simulateClick(nativePlayBtn);
+      } else {
+        const container = iframe.closest(".video-container, .question-video, .video-player, [class*='video' i]") || iframe.parentElement;
+        const playBtn = container?.querySelector("button, [class*='play' i], .vjs-big-play-button, .ytp-large-play-button");
+        if (playBtn) simulateClick(playBtn);
+      }
     } catch (_) {}
   }
 
@@ -2925,8 +2985,12 @@
       }
     } catch (_) {}
 
-    // Custom controls click fallback (VideoJS big play button / custom play buttons)
+    // Custom controls click fallback (StepTest native play button / VideoJS big play button)
     try {
+      const nativePlayBtn = findStepTestNativePlayButton();
+      if (nativePlayBtn && video.paused) {
+        simulateClick(nativePlayBtn);
+      }
       const container = video.closest(".video-container, .question-video, .video-player, [class*='video' i]") || video.parentElement;
       const playBtn = container?.querySelector(".vjs-big-play-button, .vjs-play-control, .play-btn, button[class*='play' i], [aria-label*='play' i]");
       if (playBtn && video.paused) {
@@ -2938,10 +3002,32 @@
     } catch (_) {}
   }
 
+  function checkTimerStuckWatchdog() {
+    try {
+      const timeEl = findStepTestTimecodeElement();
+      if (!timeEl) return;
+      const txt = (timeEl.innerText || timeEl.textContent || "").trim();
+      // If timecode starts with 00:00 or 0:00
+      if (/^00?:00\s*\//.test(txt)) {
+        const hasVideo = document.querySelector("video, iframe");
+        if (hasVideo) {
+          const btn = findStepTestNativePlayButton();
+          if (btn) simulateClick(btn);
+        }
+      }
+    } catch (_) {}
+  }
+
   function handleAutoPlayVideo() {
     if (!state.isEnabled || !state.autoPlayVideoEnabled) return;
 
-    // 1. YouTube iframes
+    // 1. Prioritize clicking StepTest's native play button (advances timer & progress bar natively)
+    const nativePlayBtn = findStepTestNativePlayButton();
+    if (nativePlayBtn) {
+      simulateClick(nativePlayBtn);
+    }
+
+    // 2. YouTube iframes
     const iframes = Array.from(document.querySelectorAll("iframe")).filter(f => {
       if (!isElementVisible(f) || f.closest("#gemini-live-host")) return false;
       const s = (f.src || "").toLowerCase();
@@ -2958,7 +3044,7 @@
       playYouTubeIframe(iframe);
     }
 
-    // 2. HTML5 native videos
+    // 3. HTML5 native videos
     const html5Videos = Array.from(document.querySelectorAll("video")).filter(v => {
       return isElementVisible(v) && !v.closest("#gemini-live-host");
     });
@@ -2974,6 +3060,9 @@
         playHTML5Video(video);
       }
     }
+
+    // 4. Timer Stuck Watchdog: if video is active but timer is frozen at 00:00, click native button
+    checkTimerStuckWatchdog();
 
     if (state.autoLoopVideoEnabled) {
       applyVideoLoopSettings();
