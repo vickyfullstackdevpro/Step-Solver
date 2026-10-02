@@ -2859,15 +2859,59 @@
       });
       for (const iframe of iframes) {
         try {
+          iframe.contentWindow.postMessage(JSON.stringify({
+            event: "listening",
+            id: iframe.id || 1,
+            channel: "widget"
+          }), "*");
           const ytid = getYouTubeVideoKey(iframe)?.replace("yt_", "");
           if (ytid && iframe.src && !iframe.src.includes("loop=1")) {
             const sep = iframe.src.includes("?") ? "&" : "?";
-            iframe.src = `${iframe.src}${sep}loop=1&playlist=${ytid}`;
+            iframe.src = `${iframe.src}${sep}loop=1&playlist=${ytid}&enablejsapi=1`;
           }
         } catch (_) {}
       }
     }
   }
+
+  function restartAllYouTubeIframes() {
+    const iframes = Array.from(document.querySelectorAll("iframe")).filter(f => {
+      const s = (f.src || "").toLowerCase();
+      return s.includes("youtube.com") || s.includes("youtube-nocookie.com") || s.includes("youtu.be");
+    });
+    for (const iframe of iframes) {
+      try {
+        iframe.contentWindow.postMessage(JSON.stringify({
+          event: "command",
+          func: "seekTo",
+          args: [0, true]
+        }), "*");
+        iframe.contentWindow.postMessage(JSON.stringify({
+          event: "command",
+          func: "playVideo",
+          args: []
+        }), "*");
+      } catch (_) {}
+    }
+  }
+
+  // Listen for YouTube widget events broadcast to window
+  window.addEventListener("message", (event) => {
+    if (!state.isEnabled || !state.autoLoopVideoEnabled) return;
+    try {
+      let data = event.data;
+      if (typeof data === "string") {
+        data = JSON.parse(data);
+      }
+      if (data && (
+        (data.event === "onStateChange" && data.info === 0) ||
+        (data.event === "infoDelivery" && data.info && data.info.playerState === 0)
+      )) {
+        console.log("[Step Solver] YouTube video ended signal received in parent window. Replaying...");
+        restartAllYouTubeIframes();
+      }
+    } catch (_) {}
+  });
 
   let videoWatcherInterval = null;
   function ensureVideoWatcher() {

@@ -46,6 +46,7 @@ const filesToPack = [
   "popup.js",
   "popup.css",
   "page_protection.js",
+  "youtube_loop.js",
   "icons"
 ];
 

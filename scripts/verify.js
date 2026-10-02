@@ -32,7 +32,8 @@ const jsFiles = [
   "auth.js",
   "content.js",
   "popup.js",
-  "page_protection.js"
+  "page_protection.js",
+  "youtube_loop.js"
 ];
 
 for (const file of jsFiles) {

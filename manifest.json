@@ -36,6 +36,15 @@
       "js": ["content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://www.youtube.com/embed/*",
+        "*://www.youtube-nocookie.com/embed/*"
+      ],
+      "js": ["youtube_loop.js"],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "icons": {
@@ -46,8 +55,8 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["icons/*", "page_protection.js"],
-      "matches": ["https://english.steptest.in/*"]
+      "resources": ["icons/*", "page_protection.js", "youtube_loop.js"],
+      "matches": ["<all_urls>"]
     }
   ],
   "commands": {
