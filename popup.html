@@ -24,11 +24,25 @@
 
     <!-- User Account Bar (Shown when authenticated) -->
     <div id="user-account-bar" class="user-account-bar" style="display: none;">
-      <div class="user-account-info">
-        <span class="user-email-pill" id="user-email-display">user@example.com</span>
-        <span class="device-status-pill" id="device-status-display" title="Maximum 2 Active Devices Allowed">🔒 1/2 Devices</span>
+      <div class="user-card-header">
+        <div class="user-meta">
+          <div class="user-avatar-circle">👤</div>
+          <span class="user-email-pill" id="user-email-display">user@example.com</span>
+        </div>
+        <button id="btn-sign-out" class="btn-sign-out" title="Sign Out of Step Solver">
+          <span class="sign-out-icon">🚪</span>
+          <span>Sign Out</span>
+        </button>
       </div>
-      <button id="btn-sign-out" class="btn-sign-out" title="Sign Out of Step Solver">Sign Out</button>
+      <div class="user-card-footer">
+        <div class="device-status-pill" id="device-status-display" title="Step Solver enforces strict single-device active concurrency.">
+          <span class="status-pulse-dot"></span>
+          <span class="status-pill-text">1 Active</span>
+          <span class="status-pill-sep">·</span>
+          <span class="status-pill-count">1/2 Devices</span>
+        </div>
+        <span class="device-lock-tag" title="Simultaneous solving on two machines is strictly blocked.">🔒 Single-Device Lock</span>
+      </div>
     </div>
 
     <!-- Main Container Supporting 4 Views -->

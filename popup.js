@@ -264,15 +264,18 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (deviceStatusDisplay) {
         const registeredCount = concurrency.registeredCount || concurrency.activeDeviceCount || 1;
         const maxAllowed = concurrency.maxAllowedDevices || 2;
-        if (registeredCount >= maxAllowed) {
-          deviceStatusDisplay.innerText = `🔒 1 Active Device (${registeredCount}/${maxAllowed} Registered)`;
-          deviceStatusDisplay.className = "device-status-pill warning";
-          deviceStatusDisplay.title = "Maximum 2 registered devices reached. Only 1 device active at a time. Connecting a 3rd device triggers a 24h ban.";
-        } else {
-          deviceStatusDisplay.innerText = `🔒 1 Active Device (${registeredCount}/${maxAllowed} Registered)`;
-          deviceStatusDisplay.className = "device-status-pill";
-          deviceStatusDisplay.title = "Step Solver enforces single-device active concurrency (max 2 registered devices).";
-        }
+        const isMax = registeredCount >= maxAllowed;
+
+        deviceStatusDisplay.className = `device-status-pill ${isMax ? "warning" : ""}`;
+        deviceStatusDisplay.innerHTML = `
+          <span class="status-pulse-dot"></span>
+          <span class="status-pill-text">1 Active</span>
+          <span class="status-pill-sep">·</span>
+          <span class="status-pill-count">${registeredCount}/${maxAllowed} Devices</span>
+        `;
+        deviceStatusDisplay.title = isMax
+          ? `Maximum ${maxAllowed} registered devices reached. Only 1 device active at a time. Connecting a 3rd device triggers a 24-hour ban.`
+          : `Step Solver enforces single-device active concurrency. ${registeredCount} of ${maxAllowed} allowed devices registered.`;
       }
 
       // 1. Sync authoritative cloud user profile from Supabase (payment_status, trial_started_at)
