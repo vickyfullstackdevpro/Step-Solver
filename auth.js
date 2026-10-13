@@ -503,18 +503,7 @@ async function registerDeviceOnServer(userId, deviceId, deviceName) {
   };
 
   try {
-    // 1. Update profiles table with current_device_id, friendly name, and last_active_at
-    await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify({
-        current_device_id: deviceId,
-        last_device_name: name,
-        last_active_at: new Date().toISOString()
-      })
-    });
-
-    // 2. Upsert session for this device (atomic merge, preserving up to 2 active devices)
+    // 1. Record/update device in device_sessions registry
     await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions`, {
       method: "POST",
       headers: {
@@ -537,7 +526,7 @@ async function registerDeviceOnServer(userId, deviceId, deviceName) {
   }
 }
 
-// Check multi-device concurrency (limit <= 2) and 1-day ban status
+// Check single-device active concurrency (only 1 active at a time) and multi-device limit (max 2 registered devices)
 async function verifyDeviceConcurrency() {
   const session = await getStoredSession();
   if (!session?.user?.id) {
@@ -633,19 +622,34 @@ async function verifyDeviceConcurrency() {
           };
         }
 
-        // Allowed on this device (1 or 2 devices active)
-        const activeCount = data.active_count || 1;
+        const registeredCount = data.registered_count || 1;
         const maxDevices = data.max_devices || maxAllowed;
         await chrome.storage.local.set({
-          activeDeviceCount: activeCount,
+          registeredDeviceCount: registeredCount,
           maxAllowedDevices: maxDevices
         });
 
+        // STRICT SINGLE-DEVICE CONCURRENCY CHECK:
+        if (data.is_device_active === false) {
+          // Another device is currently active! Simultaneous access is BLOCKED!
+          return {
+            isAuthenticated: true,
+            isDeviceActive: false,
+            isBanned: false,
+            conflictDeviceId: data.conflict_device_id,
+            conflictDeviceName: data.conflict_device_name || "Another Device",
+            registeredCount,
+            maxAllowedDevices: maxDevices,
+            profile
+          };
+        }
+
+        // This device is the single active device
         return {
           isAuthenticated: true,
           isDeviceActive: true,
           isBanned: false,
-          activeDeviceCount: activeCount,
+          registeredCount,
           maxAllowedDevices: maxDevices,
           profile
         };
@@ -664,101 +668,115 @@ async function verifyDeviceConcurrency() {
     if (sessionsRes.ok) {
       const activeSessions = await sessionsRes.json();
       const sessionList = Array.isArray(activeSessions) ? activeSessions : [];
-      const isAlreadyActive = sessionList.some(s => s.device_id === currentDeviceId);
+      const isAlreadyRegistered = sessionList.some(s => s.device_id === currentDeviceId);
 
-      if (isAlreadyActive) {
-        await registerDeviceOnServer(session.user.id, currentDeviceId, currentDeviceName);
-        await chrome.storage.local.set({
-          activeDeviceCount: sessionList.length,
-          maxAllowedDevices: maxAllowed
+      // Check distinct registered devices limit (max <= 2)
+      if (!isAlreadyRegistered) {
+        if (sessionList.length >= maxAllowed) {
+          // MULTI-DEVICE VIOLATION (> 2 devices detected): 3rd device attempt -> 1-DAY BAN!
+          const banDurationMs = 24 * 60 * 60 * 1000;
+          const bannedUntilDate = new Date(Date.now() + banDurationMs);
+          const bannedUntilIso = bannedUntilDate.toISOString();
+          const banReason = `Multi-device violation: Attempted 3rd device access (${currentDeviceId}) with ${sessionList.length} registered devices.`;
+
+          await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify({
+              banned_until: bannedUntilIso,
+              ban_reason: banReason,
+              ban_count: (profile.ban_count || 0) + 1,
+              current_device_id: null
+            })
+          });
+
+          await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions?user_id=eq.${session.user.id}`, {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify({ is_active: false, deactivated_at: new Date().toISOString() })
+          }).catch(() => {});
+
+          await chrome.storage.local.set({
+            isAccountBanned: true,
+            bannedUntil: bannedUntilIso,
+            bannedUntilMs: bannedUntilDate.getTime(),
+            banReason: banReason
+          });
+
+          return {
+            isAuthenticated: true,
+            isDeviceActive: false,
+            isBanned: true,
+            bannedUntil: bannedUntilIso,
+            bannedUntilMs: bannedUntilDate.getTime(),
+            remainingFormatted: "24h 00m 00s",
+            unlockFormatted: bannedUntilDate.toLocaleString(),
+            banReason,
+            profile
+          };
+        } else {
+          // Register device into device_sessions
+          await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions`, {
+            method: "POST",
+            headers: { ...headers, "Prefer": "resolution=merge-duplicates" },
+            body: JSON.stringify({
+              user_id: session.user.id,
+              device_id: currentDeviceId,
+              device_info: currentDeviceName,
+              is_active: true,
+              last_active_at: new Date().toISOString()
+            })
+          });
+          sessionList.push({ device_id: currentDeviceId, device_info: currentDeviceName });
+        }
+      }
+
+      const registeredCount = sessionList.length;
+
+      // 5. REST SINGLE-DEVICE ACTIVE CHECK:
+      // Only ONE device can be active at a time (profile.current_device_id).
+      if (!profile.current_device_id) {
+        // No device active yet -> claim active lock
+        await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({
+            current_device_id: currentDeviceId,
+            last_device_name: currentDeviceName,
+            last_active_at: new Date().toISOString()
+          })
         });
         return {
           isAuthenticated: true,
           isDeviceActive: true,
           isBanned: false,
-          activeDeviceCount: sessionList.length,
+          registeredCount,
           maxAllowedDevices: maxAllowed,
           profile
         };
       }
 
-      // If new device and count is strictly within allowance (< 2)
-      if (sessionList.length < maxAllowed) {
-        await registerDeviceOnServer(session.user.id, currentDeviceId, currentDeviceName);
-        const newCount = sessionList.length + 1;
-        await chrome.storage.local.set({
-          activeDeviceCount: newCount,
-          maxAllowedDevices: maxAllowed
-        });
+      if (profile.current_device_id === currentDeviceId) {
+        // This is the active device
         return {
           isAuthenticated: true,
           isDeviceActive: true,
           isBanned: false,
-          activeDeviceCount: newCount,
+          registeredCount,
           maxAllowedDevices: maxAllowed,
           profile
         };
       }
 
-      // MULTI-DEVICE VIOLATION (> 2 devices detected):
-      // 2 devices are already active, and this is a 3rd distinct device -> 1-DAY BAN!
-      const banDurationMs = 24 * 60 * 60 * 1000;
-      const bannedUntilDate = new Date(Date.now() + banDurationMs);
-      const bannedUntilIso = bannedUntilDate.toISOString();
-      const banReason = `Multi-device violation: Attempted 3rd device access (${currentDeviceId}) with 2 active devices.`;
-
-      // 1. Update profiles table with 24-hour ban
-      await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({
-          banned_until: bannedUntilIso,
-          ban_reason: banReason,
-          ban_count: (profile.ban_count || 0) + 1
-        })
-      });
-
-      // 2. Deactivate all active sessions for this user
-      await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions?user_id=eq.${session.user.id}`, {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({
-          is_active: false,
-          deactivated_at: new Date().toISOString()
-        })
-      }).catch(() => {});
-
-      // 3. Log incident in user_ban_logs
-      await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/user_ban_logs`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          user_id: session.user.id,
-          banned_until: bannedUntilIso,
-          reason: banReason,
-          violating_device_id: currentDeviceId,
-          violating_device_info: currentDeviceName,
-          active_device_ids: sessionList.map(s => s.device_id)
-        })
-      }).catch(() => {});
-
-      // 4. Save ban state locally
-      await chrome.storage.local.set({
-        isAccountBanned: true,
-        bannedUntil: bannedUntilIso,
-        bannedUntilMs: bannedUntilDate.getTime(),
-        banReason: banReason
-      });
-
+      // Conflict: Another device is currently active! Simultaneous access is BLOCKED!
       return {
         isAuthenticated: true,
         isDeviceActive: false,
-        isBanned: true,
-        bannedUntil: bannedUntilIso,
-        bannedUntilMs: bannedUntilDate.getTime(),
-        remainingFormatted: "24h 00m 00s",
-        unlockFormatted: bannedUntilDate.toLocaleString(),
-        banReason,
+        isBanned: false,
+        conflictDeviceId: profile.current_device_id,
+        conflictDeviceName: profile.last_device_name || "Another Device",
+        registeredCount,
+        maxAllowedDevices: maxAllowed,
         profile
       };
     }
@@ -766,26 +784,78 @@ async function verifyDeviceConcurrency() {
     console.warn("[Auth] Fallback REST check notice:", restErr.message);
   }
 
-  // Fallback: register this device
-  await registerDeviceOnServer(session.user.id, currentDeviceId, currentDeviceName);
+  // Fallback
   return {
     isAuthenticated: true,
     isDeviceActive: true,
     isBanned: false,
-    activeDeviceCount: 1,
+    registeredCount: 1,
     maxAllowedDevices: maxAllowed,
     profile
   };
 }
 
-// Claim this device (used if re-activating after ban expiry or replacing inactive session)
+// Claim this device as the SINGLE active device (atomic takeover, revoking the other device)
 async function claimThisDevice() {
   const session = await getStoredSession();
   if (!session?.user?.id) throw new Error("Please log in first.");
 
   const deviceId = await getOrCreateDeviceId();
   const deviceName = getDeviceFriendlyName();
-  await registerDeviceOnServer(session.user.id, deviceId, deviceName);
+  const token = session.access_token || AUTH_CONFIG.supabaseAnonKey;
+  const headers = {
+    "apikey": AUTH_CONFIG.supabaseAnonKey,
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json"
+  };
+
+  // 1. Try atomic claim_device RPC
+  try {
+    const res = await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/rpc/claim_device`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        p_user_id: session.user.id,
+        p_device_id: deviceId,
+        p_device_info: deviceName
+      })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.is_banned) {
+        throw new Error("Account suspended due to multi-device violation (> 2 devices).");
+      }
+      await getUserProfile(session.access_token, session.user.id);
+      return { success: true, deviceId };
+    }
+  } catch (err) {
+    console.warn("[Auth] claim_device RPC fallback:", err.message);
+  }
+
+  // 2. REST Fallback: Atomically update current_device_id on profiles
+  await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({
+      current_device_id: deviceId,
+      last_device_name: deviceName,
+      last_active_at: new Date().toISOString()
+    })
+  });
+
+  // Ensure this device is in device_sessions
+  await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/device_sessions`, {
+    method: "POST",
+    headers: { ...headers, "Prefer": "resolution=merge-duplicates" },
+    body: JSON.stringify({
+      user_id: session.user.id,
+      device_id: deviceId,
+      device_info: deviceName,
+      is_active: true,
+      last_active_at: new Date().toISOString()
+    })
+  });
+
   await getUserProfile(session.access_token, session.user.id);
   return { success: true, deviceId };
 }

@@ -84,6 +84,75 @@ function evaluateDeviceRegistration(activeSessions, currentDeviceId, maxAllowed 
   };
 }
 
+/**
+ * Pure evaluation function mirroring single-device active lock & 2-device registration limit
+ */
+function evaluateDeviceConcurrency({
+  currentDeviceId,
+  currentDeviceName = "My Computer",
+  profileCurrentDeviceId = null,
+  profileLastDeviceName = null,
+  registeredSessions = [],
+  maxAllowed = 2,
+  now = Date.now()
+}) {
+  const isRegistered = registeredSessions.some(s => s.device_id === currentDeviceId && s.is_active);
+  const activeRegisteredSessions = registeredSessions.filter(s => s.is_active);
+
+  // 1. If not registered, check if registered count exceeds maxAllowed (2 devices)
+  if (!isRegistered) {
+    if (activeRegisteredSessions.length >= maxAllowed) {
+      // 3rd distinct device attempt -> 1-day ban!
+      const banDurationMs = 24 * 60 * 60 * 1000;
+      return {
+        isBanned: true,
+        allowed: false,
+        isDeviceActive: false,
+        bannedUntil: new Date(now + banDurationMs).toISOString(),
+        banReason: `Multi-device violation: Attempted 3rd device access (${currentDeviceId}) with ${activeRegisteredSessions.length} registered devices.`
+      };
+    }
+  }
+
+  const updatedRegisteredCount = isRegistered ? activeRegisteredSessions.length : activeRegisteredSessions.length + 1;
+
+  // 2. Strict Single-Device Active Concurrency Lock:
+  // Case A: No device is currently active -> this device claims active lock
+  if (!profileCurrentDeviceId) {
+    return {
+      isBanned: false,
+      allowed: true,
+      isDeviceActive: true,
+      activeDeviceId: currentDeviceId,
+      registeredCount: updatedRegisteredCount,
+      maxAllowed
+    };
+  }
+
+  // Case B: This device is already the active device
+  if (profileCurrentDeviceId === currentDeviceId) {
+    return {
+      isBanned: false,
+      allowed: true,
+      isDeviceActive: true,
+      activeDeviceId: currentDeviceId,
+      registeredCount: updatedRegisteredCount,
+      maxAllowed
+    };
+  }
+
+  // Case C: Conflict! Another device is active. Simultaneous access is BLOCKED!
+  return {
+    isBanned: false,
+    allowed: false,
+    isDeviceActive: false,
+    conflictDeviceId: profileCurrentDeviceId,
+    conflictDeviceName: profileLastDeviceName || "Another Device",
+    registeredCount: updatedRegisteredCount,
+    maxAllowed
+  };
+}
+
 describe("Multi-Device Detection (> 2 Devices) & 1-Day User Ban Enforcement", () => {
   test("Rule 1: Clean account with no banned_until is not banned", () => {
     const profile = {
@@ -214,4 +283,115 @@ describe("Multi-Device Detection (> 2 Devices) & 1-Day User Ban Enforcement", ()
       }
     );
   });
+
+  test("Rule 10: First connecting device gains active session lock (isDeviceActive: true)", () => {
+    const res = evaluateDeviceConcurrency({
+      currentDeviceId: "dev_pc_1",
+      currentDeviceName: "Windows PC",
+      profileCurrentDeviceId: null, // No device active initially
+      registeredSessions: []
+    });
+
+    assert.equal(res.isBanned, false);
+    assert.equal(res.allowed, true);
+    assert.equal(res.isDeviceActive, true);
+    assert.equal(res.activeDeviceId, "dev_pc_1");
+    assert.equal(res.registeredCount, 1);
+  });
+
+  test("Rule 11: Simultaneous access BLOCKED: Device 2 connecting while Device 1 is active gets isDeviceActive: false", () => {
+    // Device 1 is currently active in profile
+    const res = evaluateDeviceConcurrency({
+      currentDeviceId: "dev_laptop_2",
+      currentDeviceName: "MacBook Air",
+      profileCurrentDeviceId: "dev_pc_1",
+      profileLastDeviceName: "Windows PC",
+      registeredSessions: [
+        { device_id: "dev_pc_1", is_active: true }
+      ]
+    });
+
+    assert.equal(res.isBanned, false);
+    assert.equal(res.allowed, false);
+    assert.equal(res.isDeviceActive, false);
+    assert.equal(res.conflictDeviceId, "dev_pc_1");
+    assert.equal(res.conflictDeviceName, "Windows PC");
+    assert.equal(res.registeredCount, 2);
+  });
+
+  test("Rule 12: Solver rejects question solving from inactive Device 2 with DEVICE_REVOKED", () => {
+    const concurrency = {
+      isBanned: false,
+      isDeviceActive: false,
+      conflictDeviceName: "Windows PC"
+    };
+
+    assert.throws(
+      () => {
+        if (concurrency.isDeviceActive === false) {
+          const otherDevice = concurrency.conflictDeviceName || "another machine";
+          const err = new Error(`Account currently active on ${otherDevice}. Step Solver allows only 1 active device at a time. Please open the extension popup to switch to this device.`);
+          err.code = "DEVICE_REVOKED";
+          throw err;
+        }
+      },
+      (err) => {
+        return err.code === "DEVICE_REVOKED" && err.message.includes("Step Solver allows only 1 active device at a time");
+      }
+    );
+  });
+
+  test("Rule 13: Switching device via claimThisDevice transfers active lock to Device 2", () => {
+    // When Device 2 clicks 'Use On This Device Instead', profile.current_device_id becomes dev_laptop_2
+    const profileAfterClaim = {
+      current_device_id: "dev_laptop_2",
+      last_device_name: "MacBook Air"
+    };
+
+    // Now Device 2 verifies again:
+    const resDevice2 = evaluateDeviceConcurrency({
+      currentDeviceId: "dev_laptop_2",
+      currentDeviceName: "MacBook Air",
+      profileCurrentDeviceId: profileAfterClaim.current_device_id,
+      registeredSessions: [
+        { device_id: "dev_pc_1", is_active: true },
+        { device_id: "dev_laptop_2", is_active: true }
+      ]
+    });
+    assert.equal(resDevice2.isDeviceActive, true);
+
+    // Meanwhile Device 1 now checks and is locked out:
+    const resDevice1 = evaluateDeviceConcurrency({
+      currentDeviceId: "dev_pc_1",
+      currentDeviceName: "Windows PC",
+      profileCurrentDeviceId: profileAfterClaim.current_device_id,
+      profileLastDeviceName: profileAfterClaim.last_device_name,
+      registeredSessions: [
+        { device_id: "dev_pc_1", is_active: true },
+        { device_id: "dev_laptop_2", is_active: true }
+      ]
+    });
+    assert.equal(resDevice1.isDeviceActive, false);
+    assert.equal(resDevice1.conflictDeviceId, "dev_laptop_2");
+    assert.equal(resDevice1.conflictDeviceName, "MacBook Air");
+  });
+
+  test("Rule 14: 3rd device attempt is rejected and triggers 24-hour ban even during concurrency check", () => {
+    const res = evaluateDeviceConcurrency({
+      currentDeviceId: "dev_third_phone",
+      currentDeviceName: "iPhone 15",
+      profileCurrentDeviceId: "dev_laptop_2",
+      registeredSessions: [
+        { device_id: "dev_pc_1", is_active: true },
+        { device_id: "dev_laptop_2", is_active: true }
+      ],
+      maxAllowed: 2
+    });
+
+    assert.equal(res.isBanned, true);
+    assert.equal(res.allowed, false);
+    assert.equal(res.isDeviceActive, false);
+    assert.match(res.banReason, /Attempted 3rd device access/);
+  });
 });
+

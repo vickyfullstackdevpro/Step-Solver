@@ -209,11 +209,11 @@ document.addEventListener("DOMContentLoaded", async () => {
         switchView("conflict");
         if (conflictFeedback) {
           const otherDevice = concurrency.conflictDeviceName || "another machine";
-          conflictFeedback.innerText = `Account currently active on ${otherDevice}. Single-device lock enabled.`;
+          conflictFeedback.innerText = `Account currently active on ${otherDevice}. Only 1 active device is permitted at a time. Click below to switch active access to this device.`;
           conflictFeedback.className = "auth-feedback error";
           conflictFeedback.style.display = "block";
         }
-        updateHeaderStatus("Conflict", "disconnected");
+        updateHeaderStatus("Device Conflict", "disconnected");
         return;
       }
 
@@ -223,16 +223,16 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       // Update Device Status Badge in User Account Bar
       if (deviceStatusDisplay) {
-        const activeCount = concurrency.activeDeviceCount || 1;
+        const registeredCount = concurrency.registeredCount || concurrency.activeDeviceCount || 1;
         const maxAllowed = concurrency.maxAllowedDevices || 2;
-        if (activeCount >= maxAllowed) {
-          deviceStatusDisplay.innerText = `⚠️ ${activeCount}/${maxAllowed} Devices (Max)`;
+        if (registeredCount >= maxAllowed) {
+          deviceStatusDisplay.innerText = `🔒 1 Active Device (${registeredCount}/${maxAllowed} Registered)`;
           deviceStatusDisplay.className = "device-status-pill warning";
-          deviceStatusDisplay.title = "Maximum devices reached. Connecting a 3rd device will trigger an automatic 24h ban.";
+          deviceStatusDisplay.title = "Maximum 2 registered devices reached. Only 1 device active at a time. Connecting a 3rd device triggers a 24h ban.";
         } else {
-          deviceStatusDisplay.innerText = `🔒 ${activeCount}/${maxAllowed} Devices`;
+          deviceStatusDisplay.innerText = `🔒 1 Active Device (${registeredCount}/${maxAllowed} Registered)`;
           deviceStatusDisplay.className = "device-status-pill";
-          deviceStatusDisplay.title = "Account active on 1 of 2 allowed devices.";
+          deviceStatusDisplay.title = "Step Solver enforces single-device active concurrency (max 2 registered devices).";
         }
       }
 

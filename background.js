@@ -203,8 +203,10 @@ async function handleSolveQuestion(payload) {
       throw err;
     }
     if (concurrency.isDeviceActive === false) {
-      const err = new Error("Device revoked or inactive. Please open the extension popup to verify your device.");
+      const otherDevice = concurrency.conflictDeviceName || "another machine";
+      const err = new Error(`Account currently active on ${otherDevice}. Step Solver allows only 1 active device at a time. Please open the extension popup to switch to this device.`);
       err.code = "DEVICE_REVOKED";
+      err.conflictDeviceName = concurrency.conflictDeviceName;
       throw err;
     }
   }
