@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const statusBadge = document.getElementById("status-badge");
   const userAccountBar = document.getElementById("user-account-bar");
   const userEmailDisplay = document.getElementById("user-email-display");
+  const userPlanBadge = document.getElementById("user-plan-badge");
   const deviceStatusDisplay = document.getElementById("device-status-display");
   const btnSignOut = document.getElementById("btn-sign-out");
 
@@ -68,6 +69,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const refreshBtnText = document.getElementById("refresh-btn-text");
 
   // Elements - Subscription / Trial / UPI QR & Manual Verification
+  const subscriptionCard = document.getElementById("subscription-card");
   const trialActiveView = document.getElementById("trial-active-view");
   const trialTimeBadge = document.getElementById("trial-time-badge");
   const trialExpiredView = document.getElementById("trial-expired-view");
@@ -636,14 +638,30 @@ document.addEventListener("DOMContentLoaded", async () => {
       // Populate user details for QR verification instructions
       populateQrUserDetails();
 
-      // Case 1: Lifetime Access Unlocked
+      // Case 1: Lifetime Access Unlocked -> Show PRO badge, hide bulky box!
       if (response.isLifetime) {
+        if (userPlanBadge) {
+          userPlanBadge.innerText = "⭐ PRO";
+          userPlanBadge.className = "user-plan-badge pro";
+          userPlanBadge.title = "Lifetime Pro Access Active — Unlimited AI questions & model failover unlocked forever.";
+        }
+        if (subscriptionCard) subscriptionCard.style.display = "none";
         if (trialActiveView) trialActiveView.style.display = "none";
         if (trialExpiredView) trialExpiredView.style.display = "none";
         if (qrPaymentSection) qrPaymentSection.style.display = "none";
-        if (lifetimeActiveView) lifetimeActiveView.style.display = "flex";
+        if (lifetimeActiveView) lifetimeActiveView.style.display = "none";
         return;
       }
+
+      // If not Lifetime, update badge to FREE and show upgrade card
+      if (userPlanBadge) {
+        userPlanBadge.innerText = "FREE";
+        userPlanBadge.className = "user-plan-badge free";
+        userPlanBadge.title = response.isTrialExpired
+          ? "Free trial ended. Upgrade to Lifetime Pro."
+          : "30-Minute free trial active.";
+      }
+      if (subscriptionCard) subscriptionCard.style.display = "block";
 
       // Case 2: Trial Expired -> Show Trial Expired Banner & UPI QR Code Section
       if (response.isTrialExpired) {
