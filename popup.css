@@ -1159,8 +1159,13 @@ body {
 }
 
 .btn-sign-out .sign-out-icon {
-  font-size: 10px;
-  opacity: 0.8;
+  font-size: 11px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  opacity: 0.85;
 }
 
 .btn-sign-out:hover {
