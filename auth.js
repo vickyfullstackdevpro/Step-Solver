@@ -866,17 +866,57 @@ async function claimThisDevice() {
 async function requestEmailConfirmationResend(email) {
   if (!email) throw new Error("Email is required.");
   const cleanEmail = email.trim().toLowerCase();
+  const redirectTarget = "https://english.steptest.in/?email_verified=true";
 
   // Supabase automatically sends the verification link through your Google Gmail SMTP!
-  const data = await supabaseRequest("/auth/v1/resend", {
+  const data = await supabaseRequest(`/auth/v1/resend?redirect_to=${encodeURIComponent(redirectTarget)}`, {
     method: "POST",
     body: JSON.stringify({
       type: "signup",
-      email: cleanEmail
+      email: cleanEmail,
+      options: { emailRedirectTo: redirectTarget }
     })
   });
 
   return { success: true, data };
+}
+
+// Authoritative check if user's email has been confirmed in database
+async function isEmailVerified(email) {
+  if (!email) return false;
+  const cleanEmail = email.trim().toLowerCase();
+
+  try {
+    const res = await fetch(`${AUTH_CONFIG.supabaseUrl}/rest/v1/rpc/check_email_verified`, {
+      method: "POST",
+      headers: {
+        "apikey": AUTH_CONFIG.supabaseAnonKey,
+        "Authorization": `Bearer ${AUTH_CONFIG.supabaseAnonKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ p_email: cleanEmail })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return !!data?.verified;
+    }
+  } catch (err) {
+    console.warn("[Auth] check_email_verified failed:", err.message);
+  }
+
+  // Fallback: check via active session if available
+  try {
+    const session = await getStoredSession();
+    if (session && session.user && session.user.email?.toLowerCase() === cleanEmail) {
+      const authUser = await validateSessionOnServer(session);
+      if (authUser && (authUser.email_confirmed_at || authUser.confirmed_at)) {
+        return true;
+      }
+    }
+  } catch (_) {}
+
+  return false;
 }
 
 // -------------------------------------------------------------
@@ -929,6 +969,7 @@ const stepAuthExport = {
   verifyDeviceConcurrency,
   claimThisDevice,
   requestEmailConfirmationResend,
+  isEmailVerified,
   checkManualPaymentStatus
 };
 

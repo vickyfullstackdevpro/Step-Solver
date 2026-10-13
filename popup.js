@@ -88,6 +88,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const manualStatusFeedback = document.getElementById("manual-status-feedback");
   let authMode = "signin"; // "signin" | "signup"
   let countdownInterval = null;
+  let verifyWatcherTimer = null;
 
   // -------------------------------------------------------------
   // 1. View Controller
@@ -107,6 +108,42 @@ document.addEventListener("DOMContentLoaded", async () => {
       clearInterval(banCountdownInterval);
       banCountdownInterval = null;
     }
+
+    if (viewName !== "verify" && verifyWatcherTimer) {
+      clearInterval(verifyWatcherTimer);
+      verifyWatcherTimer = null;
+    }
+  }
+
+  function startVerificationWatcher(email) {
+    if (verifyWatcherTimer) {
+      clearInterval(verifyWatcherTimer);
+      verifyWatcherTimer = null;
+    }
+    if (!email) return;
+
+    verifyWatcherTimer = setInterval(async () => {
+      if (viewVerify && viewVerify.style.display === "none") {
+        clearInterval(verifyWatcherTimer);
+        verifyWatcherTimer = null;
+        return;
+      }
+      try {
+        const verified = await StepAuth.isEmailVerified(email);
+        if (verified) {
+          clearInterval(verifyWatcherTimer);
+          verifyWatcherTimer = null;
+          showVerifyFeedback("🎉 Email verified successfully! Loading sign in...", "success");
+          setTimeout(() => {
+            setAuthMode("signin");
+            switchView("auth");
+            if (authEmailInput) authEmailInput.value = email;
+            if (authPasswordInput) authPasswordInput.focus();
+            showAuthFeedback("✓ Email verified! Please enter your password to start your 30-minute free trial.", "success");
+          }, 1200);
+        }
+      } catch (_) {}
+    }, 3000);
   }
 
   function startBanCountdown(bannedUntilIso) {
@@ -179,8 +216,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       // Check user email confirmation status
       if (authUser.email_confirmed_at === null && !authUser.confirmed_at) {
         switchView("verify");
-        if (verifyEmailDisplay) verifyEmailDisplay.innerText = authUser.email || currentSession.user?.email || "";
+        const vEmail = authUser.email || currentSession.user?.email || "";
+        if (verifyEmailDisplay) verifyEmailDisplay.innerText = vEmail;
         updateHeaderStatus("Verify Email", "disconnected");
+        startVerificationWatcher(vEmail);
         return;
       }
 
@@ -364,12 +403,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
       } else {
         try {
-          showAuthFeedback("check your email", "info");
+          showAuthFeedback("Sending verification link...", "info");
           await StepAuth.authSignUp(email, password, fullName);
           
           if (verifyEmailDisplay) verifyEmailDisplay.innerText = email;
           switchView("verify");
-          showVerifyFeedback("check your email", "success");
+          showVerifyFeedback("Verification link sent! Please click the confirmation link in your Gmail.", "info");
+          startVerificationWatcher(email);
         } catch (err) {
           showAuthFeedback(err.message || "Sign up failed. Please try again.", "error");
         } finally {
@@ -404,9 +444,29 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (btnCheckVerified) {
     btnCheckVerified.addEventListener("click", async () => {
       btnCheckVerified.disabled = true;
-      btnCheckVerified.innerText = "Verifying...";
+      btnCheckVerified.innerText = "Checking...";
       try {
-        const email = verifyEmailDisplay?.innerText || authEmailInput?.value;
+        const email = verifyEmailDisplay?.innerText || authEmailInput?.value || "";
+
+        // 1. Authoritative database check via check_email_verified RPC
+        const isVerified = await StepAuth.isEmailVerified(email);
+        if (isVerified) {
+          if (verifyWatcherTimer) {
+            clearInterval(verifyWatcherTimer);
+            verifyWatcherTimer = null;
+          }
+          showVerifyFeedback("🎉 Email verified successfully! Loading sign in...", "success");
+          setTimeout(() => {
+            setAuthMode("signin");
+            switchView("auth");
+            if (authEmailInput && email) authEmailInput.value = email;
+            if (authPasswordInput) authPasswordInput.focus();
+            showAuthFeedback("✓ Email verified! Please enter your password to start your 30-minute free trial.", "success");
+          }, 1000);
+          return;
+        }
+
+        // 2. Fallback check active session
         const session = await StepAuth.getStoredSession();
         if (session) {
           const authUser = await StepAuth.validateSessionOnServer(session);
@@ -416,17 +476,10 @@ document.addEventListener("DOMContentLoaded", async () => {
             return;
           }
         }
-        
-        // Otherwise switch to sign-in so user can enter password and log in
-        showVerifyFeedback("Account ready! Please sign in to activate your session.", "info");
-        setTimeout(() => {
-          setAuthMode("signin");
-          switchView("auth");
-          if (authEmailInput && email) authEmailInput.value = email;
-          if (authPasswordInput) authPasswordInput.focus();
-        }, 1000);
+
+        showVerifyFeedback("Email is not verified yet. Please click the confirmation link in your Gmail inbox or spam folder.", "error");
       } catch (err) {
-        showVerifyFeedback("Please check your email and click the confirmation link.", "error");
+        showVerifyFeedback("Unable to check verification. Please try again.", "error");
       } finally {
         btnCheckVerified.disabled = false;
         btnCheckVerified.innerText = "✓ I've Verified My Email";
@@ -526,6 +579,33 @@ document.addEventListener("DOMContentLoaded", async () => {
       await StepAuth.authSignOut();
       switchView("auth");
       updateHeaderStatus("Auth Required", "disconnected");
+    });
+  }
+
+  const btnBanContact = document.getElementById("btn-ban-contact");
+  if (btnBanContact) {
+    btnBanContact.addEventListener("click", () => {
+      const email = userEmailDisplay?.innerText || authEmailInput?.value || "";
+      const subject = encodeURIComponent("Ban Appeal - Step Solver");
+      const body = encodeURIComponent(
+        `Hello Support,\n\nMy Step Solver account has been temporarily suspended.\n` +
+        `Registered Email: ${email}\n` +
+        `Reason: Multi-device ban appeal\n\n` +
+        `Please help me restore access to my account.`
+      );
+      // Support @gmail.com users with direct web compose, and fallback to mailto
+      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=support.vickydevsolutions@gmail.com&su=${subject}&body=${body}`;
+      const mailtoUrl = `mailto:support.vickydevsolutions@gmail.com?subject=${subject}&body=${body}`;
+
+      try {
+        chrome.tabs.create({ url: gmailUrl }, (tab) => {
+          if (chrome.runtime.lastError || !tab) {
+            chrome.tabs.create({ url: mailtoUrl });
+          }
+        });
+      } catch (_) {
+        window.open(gmailUrl, "_blank");
+      }
     });
   }
 

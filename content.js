@@ -3773,22 +3773,25 @@
 
   function checkEmailVerifiedLanding() {
     try {
-      if (window.location.search.includes("email_verified=true") || window.location.hash.includes("type=signup")) {
+      const isVerified = window.location.search.includes("email_verified=true") || 
+                         window.location.hash.includes("type=signup") ||
+                         (window.location.hash.includes("access_token=") && window.location.search.includes("email_verified"));
+      if (isVerified) {
         const existing = document.getElementById("gemini-verified-banner");
         if (existing) return;
         const banner = document.createElement("div");
         banner.id = "gemini-verified-banner";
-        banner.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:9999999;background:linear-gradient(135deg,#064e3b,#047857);color:#ffffff;padding:16px 24px;border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,0.5);border:1px solid #10b981;font-family:sans-serif;font-size:14px;display:flex;align-items:center;gap:14px;max-width:90vw;";
+        banner.style.cssText = "position:fixed;top:24px;left:50%;transform:translateX(-50%);z-index:9999999;background:linear-gradient(135deg,#064e3b,#047857);color:#ffffff;padding:16px 24px;border-radius:14px;box-shadow:0 14px 35px rgba(0,0,0,0.55);border:1.5px solid #10b981;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;display:flex;align-items:center;gap:14px;max-width:92vw;animation:stepFadeIn 0.3s ease;";
         banner.innerHTML = `
-          <span style="font-size:24px;">✅</span>
-          <div>
-            <div style="font-weight:700;font-size:15px;color:#a7f3d0;margin-bottom:2px;">Your email is verified!</div>
-            <div style="color:#ecfdf5;font-size:13px;">Please open the Step Solver extension to sign in and begin your 30-minute free trial.</div>
+          <span style="font-size:26px;">🎉</span>
+          <div style="flex:1;">
+            <div style="font-weight:700;font-size:15px;color:#a7f3d0;margin-bottom:2px;">Email Verified Successfully!</div>
+            <div style="color:#ecfdf5;font-size:13px;line-height:1.4;">Your Step Solver account is activated. Click the extension icon in your browser toolbar to sign in and start your <strong>30-minute free trial</strong>.</div>
           </div>
-          <button style="background:none;border:none;color:#a7f3d0;font-size:18px;cursor:pointer;margin-left:12px;" onclick="this.parentElement.remove()">✕</button>
+          <button style="background:rgba(255,255,255,0.15);border:1px solid #10b981;color:#ffffff;padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600;" onclick="this.parentElement.remove()">Dismiss</button>
         `;
         document.body.appendChild(banner);
-        setTimeout(() => banner.remove(), 12000);
+        setTimeout(() => banner.remove(), 15000);
       }
     } catch (_) {}
   }

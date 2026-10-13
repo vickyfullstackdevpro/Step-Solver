@@ -276,7 +276,38 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.claim_device(uuid, text, text) TO anon, authenticated, service_role;
 
--- 6. Guarantee Lifetime PRO access for paid users
+-- 6. Atomic Function: check_email_verified
+-- Allows extension to query whether user has completed email confirmation
+CREATE OR REPLACE FUNCTION public.check_email_verified(p_email text)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_confirmed timestamptz;
+  v_user_exists boolean;
+BEGIN
+  SELECT email_confirmed_at, true
+  INTO v_confirmed, v_user_exists
+  FROM auth.users
+  WHERE lower(email) = lower(trim(p_email))
+  LIMIT 1;
+
+  IF NOT coalesce(v_user_exists, false) THEN
+    RETURN jsonb_build_object('exists', false, 'verified', false);
+  END IF;
+
+  RETURN jsonb_build_object(
+    'exists', true, 
+    'verified', (v_confirmed IS NOT NULL),
+    'confirmed_at', v_confirmed
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.check_email_verified(text) TO anon, authenticated, service_role;
+
+-- 7. Guarantee Lifetime PRO access for paid users
 UPDATE public.profiles 
 SET payment_status = 'paid', paid_at = coalesce(paid_at, now())
 WHERE email IN (
