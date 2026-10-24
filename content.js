@@ -145,6 +145,24 @@
         </div>
       </div>
 
+      <!-- Large 5-Second Answer Showcase Banner -->
+      <div id="gemini-answer-banner" class="gemini-answer-banner">
+        <div class="gemini-answer-banner-header">
+          <div class="gemini-answer-tag">
+            <span>🎯</span>
+            <span id="gemini-answer-type-title">Correct Answer</span>
+          </div>
+          <button id="gemini-btn-close-answer" class="gemini-icon-btn" title="Dismiss">✕</button>
+        </div>
+        <div class="gemini-answer-banner-body">
+          <div id="gemini-answer-main-text" class="gemini-answer-main-text"></div>
+          <div id="gemini-answer-sub-text" class="gemini-answer-sub-text"></div>
+        </div>
+        <div class="gemini-answer-progress">
+          <div id="gemini-answer-progress-bar" class="gemini-answer-progress-bar"></div>
+        </div>
+      </div>
+
       <!-- Speaking Teleprompter Overlay -->
       <div id="gemini-teleprompter" class="gemini-teleprompter-overlay">
         <div class="gemini-teleprompter-header">
@@ -168,11 +186,22 @@
           <span id="gemini-speech-meta">~0 words</span>
         </div>
       </div>
+
+      <!-- Floating Toast -->
+      <div id="gemini-toast" class="gemini-toast">
+        <span id="gemini-toast-msg">Notification</span>
+      </div>
     `;
 
     document.body.appendChild(host);
     bindHUDEvents();
     makeDraggable(document.getElementById("gemini-widget"), document.getElementById("gemini-drag-header"));
+
+    const answerBanner = document.getElementById("gemini-answer-banner");
+    const answerHeader = answerBanner ? answerBanner.querySelector(".gemini-answer-banner-header") : null;
+    if (answerBanner && answerHeader) {
+      makeDraggable(answerBanner, answerHeader);
+    }
   }
 
   // -------------------------------------------------------------
@@ -210,16 +239,12 @@
     toggleAuto.addEventListener("change", (e) => {
       if (!state.isEnabled) {
         e.target.checked = false;
+        showToast("Enable extension first");
         return;
       }
       state.isAutoWatch = e.target.checked;
-      state.autoSubmitEnabled = e.target.checked;
-      chrome.storage.local.set({
-        isAutoWatch: e.target.checked,
-        autoSubmitEnabled: e.target.checked
-      });
+      showToast(state.isAutoWatch ? "Auto-Solve Loop Activated" : "Auto-Solve Loop Paused");
       if (state.isAutoWatch) {
-        ensureAnswerPageWatcher();
         startAutoWatcher();
         triggerSolve(true);
       } else {
@@ -343,17 +368,87 @@
     });
   }
 
-  // Answer Showcase Banner - Completely Removed per User Request (Silent Operation)
+  // Answer Showcase Banner (Persists until moved to the next question)
   function showAnswerBanner(mainText, subText = "", typeTitle = "Correct Answer") {
-    // Bottom popup completely removed per user request. Status is displayed in top widget.
+    // If Answer Popup setting is OFF, suppress the popup banner
+    if (state.answerPopupEnabled === false) {
+      hideAnswerBanner();
+      return;
+    }
+
+    const banner = document.getElementById("gemini-answer-banner");
+    const mainEl = document.getElementById("gemini-answer-main-text");
+    const subEl = document.getElementById("gemini-answer-sub-text");
+    const typeEl = document.getElementById("gemini-answer-type-title");
+    const progBar = document.getElementById("gemini-answer-progress-bar");
+
+    if (!banner || !mainEl) return;
+
+    if (state.bannerTimer) {
+      clearTimeout(state.bannerTimer);
+      state.bannerTimer = null;
+    }
+
+    let displayMain = (mainText || "").trim();
+    let displaySub = (subText || "").trim();
+
+    // If mainText is a generic placeholder like "Option" or "MCQ", promote genuine subText
+    if (/^(option|options|mcq|mcq answer|answer pending|answer|unknown)$/i.test(displayMain)) {
+      if (displaySub && displaySub.length > 0) {
+        displayMain = displaySub;
+        displaySub = "";
+      }
+    }
+
+    mainEl.innerText = displayMain;
+    if (subEl) {
+      subEl.innerText = displaySub;
+      subEl.style.display = displaySub ? "block" : "none";
+    }
+    if (typeEl) typeEl.innerText = typeTitle;
+
+    // Keep persistent until moved to the next question (no auto-vanish)
+    if (progBar) {
+      progBar.style.display = "none";
+    }
+
+    banner.classList.remove("animating");
+    banner.classList.add("show");
   }
 
   function hideAnswerBanner() {
-    // Bottom popup completely removed per user request.
+    const banner = document.getElementById("gemini-answer-banner");
+    if (banner) {
+      banner.classList.remove("show", "animating");
+    }
+    if (state.bannerTimer) {
+      clearTimeout(state.bannerTimer);
+      state.bannerTimer = null;
+    }
   }
 
   function showTrialExpiredBanner(purchaseUrl) {
-    updateStatus("Trial Expired", "error", "LOCKED");
+    const targetUrl = purchaseUrl || "https://vignesh-fullstackdev-portfolio.vercel.app/";
+    renderAnswerBanner(
+      "30-Minute Free Trial Ended",
+      "Upgrade to Lifetime Access (₹50) to continue solving unlimited questions.",
+      "⏳ Free Trial Expired"
+    );
+
+    const subEl = document.getElementById("gemini-answer-sub-text");
+    if (subEl) {
+      subEl.innerHTML = `
+        <div style="color: #cbd5e1; font-size: 11px; margin-top: 4px; line-height: 1.4;">
+          Your 30-minute free trial has expired. Upgrade to lifetime access to continue solving questions automatically.
+        </div>
+        <div style="margin-top: 8px;">
+          <a href="${targetUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 6px 14px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; font-weight: 700; font-size: 11px; border-radius: 6px; text-decoration: none; box-shadow: 0 3px 10px rgba(16, 185, 129, 0.4); transition: transform 0.15s ease;">
+            ⭐ Get Lifetime Access (₹50)
+          </a>
+        </div>
+      `;
+      subEl.style.display = "block";
+    }
   }
 
   function updateStatus(status, type = "working", badge = "SCANNING") {
@@ -372,8 +467,12 @@
   }
 
   function showToast(message) {
-    // Bottom popup toast completely removed per user request
-    if (message) console.log("[Step Solver Toast]", message);
+    const toast = document.getElementById("gemini-toast");
+    const toastMsg = document.getElementById("gemini-toast-msg");
+    if (!toast || !toastMsg) return;
+    toastMsg.innerText = message;
+    toast.classList.add("show");
+    setTimeout(() => toast.classList.remove("show"), 3500);
   }
 
   function showInfo(infoText) {
@@ -461,7 +560,6 @@
 
   function findActiveQuestionContainer() {
     if (isAnswerOrFeedbackPage()) return null;
-    if (!isQuestionOrTestActive()) return null;
     const meta = getCurrentQuestionMeta();
     const currentNum = meta.currentNum;
 
@@ -635,30 +733,6 @@
     return isAnswerOrFeedbackPage();
   }
 
-  // Check if current page is an active test/question flow
-  // User rule: Check only for the question if submit (or test action) button exists; if not means ignore (e.g. on home / course dashboard)
-  function isQuestionOrTestActive() {
-    const url = (window.location.href || "").toLowerCase();
-    const isCourseOverview = (url.includes("/courses/") || url.includes("/dashboard") || url.includes("/home") || url.includes("/my-courses")) &&
-      !url.includes("/take") && !url.includes("/attempt") && !url.includes("/test") && !url.includes("/quiz") && !url.includes("/assessment");
-
-    const hasSubmitBtn = typeof findActionElement === "function" ? !!findActionElement("submit") : false;
-    const hasResetBtn = Array.from(document.querySelectorAll("button, a, input, div[role='button']"))
-      .some(b => isElementVisible(b) && !isNavOrSystem(b) && safeText(b).toLowerCase().startsWith("reset"));
-    const hasNextBtn = typeof findActionElement === "function" ? !!findActionElement("next") : false;
-    const hasStartBtn = typeof findActionElement === "function" ? !!findActionElement("start") : false;
-
-    // If submit button or reset button exists, this is an active question
-    if (hasSubmitBtn || hasResetBtn) return true;
-
-    // If answer/feedback page with next button, or test start screen, it's valid test flow
-    if (hasNextBtn && isAnswerOrFeedbackPage()) return true;
-    if (hasStartBtn) return true;
-
-    // Otherwise, if no submit/reset/test button exists (e.g. on course overview or dashboard), ignore
-    return false;
-  }
-
   // Check if current question is a Cloze / Multi-Blank Passage Question
   function checkIsClozePassage(container) {
     const scope = (container && container !== document.body) ? container : document.body;
@@ -688,19 +762,8 @@
       return false;
     }
 
-    // Exclude single-choice questions ONLY if not explicitly a multi-blank prompt
-    const isMultipleBlankPrompt = (
-      pageText.includes("fill in the blanks") ||
-      pageText.includes("fill in each blank") ||
-      pageText.includes("words for the blanks") ||
-      pageText.includes("read the conversation, fill in the blanks") ||
-      pageText.includes("complete an apology letter") ||
-      pageText.includes("to complete an apology letter") ||
-      pageText.includes("complete the letter") ||
-      pageText.includes("complete the conversation")
-    );
-
-    const isSingleChoicePrompt = !isMultipleBlankPrompt && (
+    // Exclude single-choice questions (e.g. "1. Fill in the blank", "best answer from the following", "fill in the blank with the best answer")
+    const isSingleChoicePrompt = (
       pageText.includes("fill in the blank with the best answer") ||
       pageText.includes("fill in the blank with the correct") ||
       pageText.includes("best answer from the following") ||
@@ -716,12 +779,10 @@
     }
 
     const hasClozeKeywords = (
-      isMultipleBlankPrompt ||
       pageText.includes("words for the blanks") ||
       pageText.includes("choosing the correct words") ||
       pageText.includes("words that best complete") ||
       pageText.includes("fill in the blanks with suitable words") ||
-      pageText.includes("fill in the blanks with the correct words") ||
       pageText.includes("fill in the blanks with words") ||
       pageText.includes("fill in the blanks") ||
       pageText.includes("fill in each blank") ||
@@ -729,8 +790,7 @@
       pageText.includes("complete the passage") ||
       pageText.includes("complete the airport announcement") ||
       pageText.includes("complete the announcement") ||
-      pageText.includes("passage in a logical sequence") ||
-      pageText.includes("record your responses")
+      pageText.includes("passage in a logical sequence")
     );
 
     const hasBlankDom = Array.from(document.querySelectorAll("[class*='blank' i], [class*='slot' i], [class*='drop' i], [class*='gap' i], [class*='target' i], [data-blank], [data-slot], [class*='droppable' i]"))
@@ -752,7 +812,7 @@
     function isValidChip(el) {
       if (!el || !isElementVisible(el) || el.closest("#gemini-live-host, #steptest-ai-banner, header, nav, video, iframe, .ytp-chrome-bottom")) return false;
       const txt = safeText(el);
-      if (!txt || txt.length < 1 || txt.length > 400) return false;
+      if (!txt || txt.length < 1 || txt.length > 60) return false;
       const lower = txt.toLowerCase();
       if (/^(reset|submit|next|replay|play|save|continue|grade)\b/i.test(lower)) return false;
       if (lower.startsWith("fill in the blank")) return false;
@@ -792,10 +852,6 @@
           t.includes("choices below") ||
           t.includes("from the choices") ||
           t.includes("words for the blanks") ||
-          t.includes("options below") ||
-          t.includes("read the conversation") ||
-          t.includes("record your responses") ||
-          t.includes("complete an apology letter") ||
           t.includes("complete the")
         ) {
           startIdx = i;
@@ -866,40 +922,27 @@
       return !/^(reset|submit|next)\b/i.test(t);
     });
 
-    // Also scan passage paragraphs, conversation cards, and content blocks for rounded empty inline boxes / drop zones
-    const paragraphs = Array.from(scope.querySelectorAll("p, div, section, article, fieldset")).filter(p => {
+    // Also scan passage paragraphs for rounded empty inline boxes / drop zones
+    const paragraphs = Array.from(scope.querySelectorAll("p, div.passage, div.content, div.question-body, section")).filter(p => {
       if (!isElementVisible(p) || isNavOrSystem(p)) return false;
-      if (p.closest("#gemini-live-host, #steptest-ai-banner, nav, header")) return false;
       const txt = safeText(p);
-      return txt.length > 15 && !/^\d+\s+of\s+\d+/i.test(txt);
+      return txt.length > 20 && !txt.includes("14 of 14") && (txt.includes("delayed") || txt.includes("flight") || txt.includes("All") || txt.includes("check") || txt.includes("number"));
     });
 
     for (const p of paragraphs) {
-      const inlineBoxes = Array.from(p.querySelectorAll("span, div, input, a, button")).filter(el => {
-        if (!isElementVisible(el) || blanks.includes(el) || el.closest("#gemini-live-host, #steptest-ai-banner, header, nav")) return false;
-        const lower = safeText(el).toLowerCase().trim();
-        if (/^(reset|submit|next|start)\b/i.test(lower)) return false;
-
+      const inlineBoxes = Array.from(p.querySelectorAll("span, div, input")).filter(el => {
+        if (!isElementVisible(el) || blanks.includes(el) || el.closest("#gemini-live-host, #steptest-ai-banner")) return false;
         const rect = el.getBoundingClientRect();
-        if (rect.width < 18 || rect.height < 14) return false;
-
-        if (el.matches("[class*='blank' i], [class*='slot' i], [class*='drop' i], [class*='gap' i], [class*='target' i], [class*='dashed' i], [class*='dotted' i], [data-blank], [data-slot]")) {
-          return true;
-        }
-
-        const txt = safeText(el).trim();
-        return (txt.length === 0 || /^\[?\s*blank\s*\d*\s*\]?$/i.test(txt) || /^_{1,}$/.test(txt));
+        const txt = safeText(el);
+        return rect.width >= 20 && rect.height >= 14 && (txt.length === 0 || /^\[?\s*blank\s*\d*\s*\]?$/i.test(txt) || /^_{1,}$/.test(txt));
       });
       inlineBoxes.forEach(box => {
         if (!blanks.includes(box)) blanks.push(box);
       });
     }
 
-    // Filter out parent wrappers if inner child is already recorded as a blank
-    const leafBlanks = blanks.filter(b => !blanks.some(other => other !== b && b.contains(other)));
-
     // Sort by physical reading order (top-to-bottom, left-to-right)
-    leafBlanks.sort((a, b) => {
+    blanks.sort((a, b) => {
       const rA = a.getBoundingClientRect();
       const rB = b.getBoundingClientRect();
       if (Math.abs(rA.top - rB.top) > 12) {
@@ -908,85 +951,13 @@
       return rA.left - rB.left;
     });
 
-    if (leafBlanks.length === 0 && scope !== document.body) {
+    if (blanks.length === 0 && scope !== document.body) {
       return findClozeBlanks(document.body);
     }
-    return leafBlanks;
+    return blanks;
   }
 
-  // Helper to find the destination container (e.g. "YOUR SENTENCE" / "YOUR STORY" / "YOUR PASSAGE" / "YOUR ANSWER" box)
-  // Helper to find the Word Bank container
-  function findWordBankContainer(scope) {
-    if (!scope) return null;
-    const allEls = Array.from(scope.querySelectorAll("*")).filter(isElementVisible);
-    for (const el of allEls) {
-      if (isNavOrSystem(el)) continue;
-      const t = safeText(el).trim().toLowerCase();
-      if (
-        t === "word bank" ||
-        t === "phrase bank" ||
-        t === "words to arrange" ||
-        t === "items to arrange" ||
-        t === "word list" ||
-        t === "words"
-      ) {
-        const box = el.closest("fieldset, [class*='bank' i], [class*='words' i], [class*='pool' i], [class*='source' i], [class*='box' i], [class*='container' i]");
-        return { header: el, container: box || el.parentElement };
-      }
-    }
-    return null;
-  }
-
-  // Helper to find the destination container (e.g. "YOUR SENTENCE" / "YOUR STORY" / "YOUR PASSAGE" / "YOUR ANSWER" box or numbered slots)
-  function findDestinationContainer(scope) {
-    if (!scope) return null;
-    const allEls = Array.from(scope.querySelectorAll("*")).filter(isElementVisible);
-    const wordBank = findWordBankContainer(scope);
-    const wordBankEl = wordBank ? (wordBank.container || wordBank.header) : null;
-
-    for (const el of allEls) {
-      if (isNavOrSystem(el)) continue;
-      const t = safeText(el).trim().toLowerCase();
-      if (
-        t === "your sentence" ||
-        t === "your answer" ||
-        t === "your story" ||
-        t === "your passage" ||
-        t === "your response" ||
-        t.startsWith("your sentence") ||
-        t.startsWith("your answer") ||
-        t.startsWith("your story")
-      ) {
-        let curr = el;
-        let bestBox = el.parentElement;
-        while (curr && curr !== scope && curr !== document.body) {
-          if (curr.matches && curr.matches("fieldset, [class*='sentence' i], [class*='answer' i], [class*='drop' i], [class*='target' i], [class*='board' i], [class*='destination' i]")) {
-            if (!wordBankEl || !curr.contains(wordBankEl)) {
-              return curr;
-            }
-          }
-          if (curr !== el && (!wordBankEl || !curr.contains(wordBankEl))) {
-            bestBox = curr;
-          }
-          if (wordBankEl && curr.contains(wordBankEl)) {
-            break;
-          }
-          curr = curr.parentElement;
-        }
-        return bestBox || el.parentElement;
-      }
-    }
-
-    // Numbered slot destination (e.g. 1. [ ] 2. [ ] 3. [ ])
-    const slotContainer = scope.querySelector(".slots-container, [class*='slots' i], [class*='dropzone' i]");
-    if (slotContainer && (!wordBankEl || !slotContainer.contains(wordBankEl))) {
-      return slotContainer;
-    }
-
-    return null;
-  }
-
-  // Check if current question is a Sentence / Phrase / Order Rearrangement question
+  // Check if current question is a Sentence / Phrase Rearrangement question
   function checkIsRearrangeQuestion(container) {
     const scope = (container && container !== document.body) ? container : document.body;
     const pageText = (safeText(scope) + " " + (document.body ? safeText(document.body) : "")).toLowerCase();
@@ -1031,23 +1002,8 @@
       pageText.includes("arrange sentences") ||
       pageText.includes("arrange the words") ||
       pageText.includes("arrange the phrases") ||
-      pageText.includes("arrange the following") ||
-      pageText.includes("list the following items in the order") ||
-      pageText.includes("in the order they should appear") ||
-      pageText.includes("order they should appear") ||
-      pageText.includes("in the order they should") ||
-      pageText.includes("put the following in the correct order") ||
-      pageText.includes("put the sentences in order") ||
-      pageText.includes("put the phrases in order") ||
-      pageText.includes("put in the correct order") ||
-      pageText.includes("put in order") ||
-      pageText.includes("sequence the following") ||
-      pageText.includes("place in order") ||
-      pageText.includes("order the following") ||
-      pageText.includes("in the correct sequence") ||
       pageText.includes("form a logical sentence") ||
       pageText.includes("form a sentence") ||
-      (pageText.includes("word bank") && (pageText.includes("your sentence") || pageText.includes("your story") || pageText.includes("your passage") || pageText.includes("your answer"))) ||
       (pageText.includes("rearrange") && pageText.includes("read it aloud"))
     );
 
@@ -1057,16 +1013,13 @@
 
     if (hasRearrangeKeywords) return true;
 
-    // Reset button check: search visible buttons on page
+    // Reset button check: search visible buttons on page ONLY with genuine slot dashes
     const hasVisibleResetBtn = Array.from(document.querySelectorAll("button, a, input, div, span, [role='button']"))
       .some(b => isElementVisible(b) && !isNavOrSystem(b) && safeText(b).toLowerCase().startsWith("reset"));
 
-    if (hasVisibleResetBtn) {
-      const hasOrderKeywords = pageText.includes("order") || pageText.includes("sequence") || pageText.includes("arrange") || pageText.includes("rearrange") || pageText.includes("appear");
-      const hasSlotDashes = (pageText.includes("——") || pageText.includes("––") || pageText.includes("— —")) || (pageText.includes("1.") && pageText.includes("2."));
-      if (hasOrderKeywords || hasSlotDashes) {
-        return true;
-      }
+    const hasSlotDashes = (pageText.includes("——") || pageText.includes("––") || pageText.includes("— —")) && (pageText.includes("“") || pageText.includes("”"));
+    if (hasVisibleResetBtn && hasSlotDashes) {
+      return true;
     }
 
     return false;
@@ -1078,66 +1031,23 @@
     const seen = new Set();
     const scope = (container && container !== document.body && container.querySelectorAll("*").length > 5) ? container : document.body;
 
-    const destContainer = findDestinationContainer(scope) || findDestinationContainer(document.body);
-
     function isValidChip(el) {
-      if (!el || !isElementVisible(el) || el.closest("#gemini-live-host, #steptest-ai-banner, header, nav, video, iframe, .ytp-chrome-bottom")) return false;
-
-      // CRITICAL: Chips already inside or belonging to the destination box (YOUR SENTENCE / YOUR STORY) are NOT available tokens
-      if (destContainer && (el === destContainer || destContainer.contains(el))) return false;
-
-      const txt = safeText(el).trim();
-      if (!txt || txt.length < 1 || txt.length > 500) return false;
+      if (!el || !isElementVisible(el) || el.closest("#gemini-live-host, header, nav, video, iframe, .ytp-chrome-bottom")) return false;
+      const txt = safeText(el);
+      if (!txt || txt.length < 1 || txt.length > 450) return false;
       const lower = txt.toLowerCase();
-
-      // System / UI navigation words
-      if (/^(reset|submit|next|replay|play|save|continue|grade|abc|record|speak|mic|listen|share|subscribe)\b/i.test(lower)) return false;
-
-      // Question instructions and labels
+      if (/^(reset|submit|next|replay|play|save|continue|grade|abc|record|speak|mic|listen)\b/i.test(lower)) return false;
       if (lower.startsWith("rearrange the words or phrases")) return false;
       if (lower.startsWith("arrange the following sentences")) return false;
-      if (lower.startsWith("rearrange the following sentences")) return false;
-      if (lower.startsWith("arrange the sentences")) return false;
-      if (lower.startsWith("rearrange the sentence")) return false;
-      if (lower.startsWith("rearrange words")) return false;
-      if (lower.startsWith("rearrange phrases")) return false;
       if (lower.startsWith("form a logical sentence")) return false;
-      if (lower.startsWith("form sentences")) return false;
-      if (lower.startsWith("form a sentence")) return false;
-      if (lower.startsWith("list the following items in the order")) return false;
-      if (lower.startsWith("list the following items")) return false;
-      if (lower.startsWith("list the following")) return false;
-
-      // Filter contextual prompts containing rearrange instructions
-      if (lower.includes("arrange the following sentences") || lower.includes("rearrange the following sentences")) return false;
-      if (lower.includes("in the correct sequence to see") || lower.includes("in the correct sequence")) return false;
-      if (lower.includes("rearrange the words or phrases") || lower.includes("form a logical sentence")) return false;
-      if (lower.includes("order they should appear in the minutes") || lower.includes("order they should appear")) return false;
-
-      // Video & helper labels
-      if (lower.includes("if the video is not loading")) return false;
-      if (lower === "click here" || lower.startsWith("click here")) return false;
-      if (lower.includes("watch on youtube") || lower.includes("step - the hindu group")) return false;
+      if (lower.startsWith("if the video is not loading")) return false;
       if (lower.includes("record your answer using your microphone")) return false;
       if (lower.includes("form sentences that express opinion")) return false;
       if (/^\d{1,2}:\d{2}/.test(lower)) return false; // timecode
-
-      // StepTest UI Headers & Subtext
-      if (lower === "your sentence" || lower === "your answer" || lower === "your story" || lower === "your passage" || lower === "your response") return false;
-      if (lower === "word bank" || lower === "phrase bank" || lower === "word list" || lower === "words" || lower === "words to arrange" || lower === "items to arrange") return false;
-      if (lower.includes("tap chips below") || lower.includes("tap words below") || lower.includes("build your answer")) return false;
-      if (lower.includes("tap on the words") || lower.includes("tap to build") || lower.includes("tap chips")) return false;
-
-      // Numbered slot labels and empty brackets (e.g. "1.", "2.", "3.", "4.", "[ ]")
-      if (/^\d+[\.\)]?\s*$/.test(txt)) return false;
-      if (/^\[\s*\]$/.test(txt)) return false;
-
-      // Punctuation, blanks & slots
       if (el.matches("button[type='submit'], input[type='submit']")) return false;
       if (txt.includes("“") || txt.includes("”")) return false; // slot container quotes
       if (/^[—–\-_.\s]+$/.test(txt)) return false; // slot lines or dashes
       if (/^\d+\s+of\s+\d+(\s+questions?)?$/i.test(txt)) return false; // question counter
-
       return true;
     }
 
@@ -1148,96 +1058,7 @@
       return !hasChipChild;
     }
 
-    // Strategy 0: Word Bank Section (Direct Word Bank container scan)
-    const wordBankInfo = findWordBankContainer(scope) || findWordBankContainer(document.body);
-    if (wordBankInfo) {
-      if (wordBankInfo.container) {
-        const bankChips = Array.from(wordBankInfo.container.querySelectorAll("*")).filter(isLeafChip);
-        if (bankChips.length >= 3) {
-          bankChips.forEach(el => {
-            if (!seen.has(el)) {
-              seen.add(el);
-              tokens.push({
-                element: el,
-                index: tokens.length,
-                id: `token_${tokens.length}`,
-                text: safeText(el).trim()
-              });
-            }
-          });
-          return tokens;
-        }
-      }
-
-      // Linear scan between Word Bank header and Reset button
-      const allElements = Array.from(scope.querySelectorAll("*")).filter(isElementVisible);
-      const bankHeaderIdx = allElements.indexOf(wordBankInfo.header);
-
-      let endIdx = -1;
-      const resetBtn = allElements.find((el, idx) => {
-        if (idx <= bankHeaderIdx || isNavOrSystem(el)) return false;
-        const txt = safeText(el).toLowerCase().trim();
-        return txt === "reset" || txt.startsWith("reset");
-      });
-
-      if (resetBtn) {
-        endIdx = allElements.indexOf(resetBtn);
-      } else {
-        const boundaryBtn = allElements.findIndex((el, idx) => {
-          if (idx <= bankHeaderIdx) return false;
-          const txt = safeText(el).toLowerCase().trim();
-          return (txt === "submit" || txt === "next") && el.matches("button, input, [role='button']");
-        });
-        endIdx = boundaryBtn !== -1 ? boundaryBtn : allElements.length;
-      }
-
-      if (bankHeaderIdx !== -1) {
-        for (let i = bankHeaderIdx + 1; i < endIdx; i++) {
-          const el = allElements[i];
-          if (isLeafChip(el) && !seen.has(el)) {
-            const t = safeText(el).trim();
-            seen.add(el);
-            tokens.push({
-              element: el,
-              index: tokens.length,
-              id: `token_${tokens.length}`,
-              text: t
-            });
-          }
-        }
-        if (tokens.length >= 3) return tokens;
-      }
-    }
-
-    // Strategy 0b: Scan chips immediately preceding Reset Button
-    const allDocElements = Array.from(document.querySelectorAll("*")).filter(isElementVisible);
-    const resetBtnEl = allDocElements.find(el => {
-      if (isNavOrSystem(el)) return false;
-      const txt = safeText(el).toLowerCase().trim();
-      return (txt === "reset" || txt.startsWith("reset")) && el.matches("button, a, input, [role='button'], div, span");
-    });
-
-    if (resetBtnEl) {
-      const resetIdx = allDocElements.indexOf(resetBtnEl);
-      if (resetIdx > 0) {
-        const startScan = Math.max(0, resetIdx - 50);
-        for (let i = startScan; i < resetIdx; i++) {
-          const el = allDocElements[i];
-          if (isLeafChip(el) && !seen.has(el)) {
-            seen.add(el);
-            tokens.push({
-              element: el,
-              index: tokens.length,
-              id: `token_${tokens.length}`,
-              text: safeText(el).trim()
-            });
-          }
-        }
-        if (tokens.length >= 3) return tokens;
-      }
-    }
-
-    // Strategy 0c: Instruction Anchor to Reset Button (Fallback)
+    // Strategy 0: Find instruction anchor within the current question scope
     const allLabels = Array.from(scope.querySelectorAll("*")).filter(el => isElementVisible(el) && !isNavOrSystem(el));
     const matchingAnchors = allLabels.filter(el => {
       const t = safeText(el).toLowerCase();
@@ -1250,16 +1071,10 @@
         t.includes("rearrange phrases") ||
         t.includes("arrange the following sentences") ||
         t.includes("arrange the sentences") ||
-        t.includes("arrange sentences") ||
         t.includes("arrange the words") ||
         t.includes("form a logical sentence") ||
         t.includes("form sentences") ||
-        t.includes("form a sentence") ||
-        t.includes("list the following items in the order") ||
-        t.includes("in the order they should appear") ||
-        t.includes("order they should appear") ||
-        t.includes("sequence the following") ||
-        t.includes("put the following in the correct order")
+        t.includes("form a sentence")
       );
     });
 
@@ -1273,15 +1088,15 @@
       let endIdx = -1;
       const resetBtn = allElements.find((el, idx) => {
         if (idx <= anchorIdx || isNavOrSystem(el)) return false;
-        const txt = safeText(el).toLowerCase().trim();
-        return txt === "reset" || txt.startsWith("reset");
+        const txt = safeText(el).toLowerCase();
+        return txt.startsWith("reset");
       });
       if (resetBtn) {
         endIdx = allElements.indexOf(resetBtn);
       } else {
         const boundaryBtn = allElements.findIndex((el, idx) => {
           if (idx <= anchorIdx) return false;
-          const txt = safeText(el).toLowerCase().trim();
+          const txt = safeText(el).toLowerCase();
           return (txt === "submit" || txt === "next") && el.matches("button, input, [role='button']");
         });
         endIdx = boundaryBtn !== -1 ? boundaryBtn : allElements.length;
@@ -1291,7 +1106,7 @@
         for (let i = anchorIdx + 1; i < endIdx; i++) {
           const el = allElements[i];
           if (isLeafChip(el) && !seen.has(el)) {
-            const t = safeText(el).trim();
+            const t = safeText(el);
             seen.add(el);
             tokens.push({
               element: el,
@@ -1307,8 +1122,7 @@
 
     // Strategy A: Direct container holding 3 to 15 leaf chips
     const candidateContainers = Array.from(scope.querySelectorAll("div, ul, section, ol")).filter(p => {
-      if (!isElementVisible(p) || p.closest("#gemini-live-host, #steptest-ai-banner, header, nav, video, iframe")) return false;
-      if (destContainer && (p === destContainer || destContainer.contains(p))) return false;
+      if (!isElementVisible(p) || p.closest("#gemini-live-host, header, nav, video, iframe")) return false;
       const leafChips = Array.from(p.querySelectorAll("*")).filter(isLeafChip);
       return leafChips.length >= 3 && leafChips.length <= 15;
     });
@@ -1317,7 +1131,7 @@
       candidateContainers.sort((a, b) => a.querySelectorAll("*").length - b.querySelectorAll("*").length);
       const bestContainer = candidateContainers[0];
       Array.from(bestContainer.querySelectorAll("*")).filter(isLeafChip).forEach(el => {
-        const t = safeText(el).trim();
+        const t = safeText(el);
         if (!seen.has(el)) {
           seen.add(el);
           tokens.push({
@@ -1342,7 +1156,7 @@
       const found = Array.from(scope.querySelectorAll(sel)).filter(isLeafChip);
       if (found.length >= 3 && found.length <= 15) {
         found.forEach((el) => {
-          const t = safeText(el).trim();
+          const t = safeText(el);
           if (!seen.has(el)) {
             seen.add(el);
             tokens.push({ element: el, index: tokens.length, id: `token_${tokens.length}`, text: t });
@@ -1365,17 +1179,11 @@
     const scope = (container && container !== document.body) ? container : document.body;
 
     // CRITICAL: Only suppress MCQ options if confirmed interactive chips/tokens exist for Cloze or Rearrange!
-    const hasRadioInputs = Array.from(document.querySelectorAll("input[type='radio']")).some(isElementVisible);
-    if (!hasRadioInputs) {
-      if (
-        (checkIsRearrangeQuestion(scope) || checkIsRearrangeQuestion(document.body)) &&
-        (findRearrangeTokens(scope).length >= 3 || findRearrangeTokens(document.body).length >= 3)
-      ) {
-        return [];
-      }
-      if (checkIsClozePassage(scope) && findClozeChips(scope).length >= 2 && findClozeBlanks(scope).length >= 2) {
-        return [];
-      }
+    if (
+      (checkIsRearrangeQuestion(scope) && findRearrangeTokens(scope).length >= 3) ||
+      (checkIsClozePassage(scope) && findClozeChips(scope).length >= 2 && findClozeBlanks(scope).length >= 2)
+    ) {
+      return [];
     }
 
     const options = [];
@@ -1615,14 +1423,11 @@
     const hasMultipleBlanks = clozeBlanks.length >= 2 || (clozeChips.length >= 2 && /\[\s*blank\s*[12]|\[\s*_\s*\]|\[\s*\]|_{2,}.*_{2,}/is.test(cleanContext));
     const finalIsCloze = isCloze && clozeChips.length >= 2 && hasMultipleBlanks;
 
-    // 3. Check if this is a Sentence Rearrangement Question (Scoped strictly to active container with document fallback)
-    const isRearrange = !finalIsCloze && (checkIsRearrangeQuestion(container) || checkIsRearrangeQuestion(document.body));
+    // 3. Check if this is a Sentence Rearrangement Question (Scoped strictly to active container)
+    const isRearrange = !finalIsCloze && checkIsRearrangeQuestion(container);
     let sentenceTokens = [];
     if (isRearrange) {
       sentenceTokens = findRearrangeTokens(container);
-      if (sentenceTokens.length < 3) {
-        sentenceTokens = findRearrangeTokens(document.body);
-      }
     }
     // Question is rearrangement ONLY if rearrange keywords/Reset exist AND at least 3 visible chips are found
     const finalIsRearrange = isRearrange && sentenceTokens.length >= 3;
@@ -1778,28 +1583,10 @@
       }
     }
 
-    // Fingerprint of context or options to differentiate consecutive questions with identical prompts
-    const optionsSnippet = (data?.options || data?.wordChoices || data?.sentenceTokens || [])
-      .map(o => (o.text || "").slice(0, 8))
-      .join("_")
-      .replace(/[^a-zA-Z0-9_]/g, "")
-      .toLowerCase()
-      .slice(0, 30);
-
-    const contextSnippet = (data?.context || "")
-      .slice(0, 30)
-      .replace(/[^a-zA-Z0-9]/g, "")
-      .toLowerCase();
-
-    const fingerprint = optionsSnippet || contextSnippet;
-
     if (prefix && titlePart) {
-      return fingerprint ? `${prefix}::${titlePart}::${fingerprint}` : `${prefix}::${titlePart}`;
+      return `${prefix}::${titlePart}`;
     }
-    if (titlePart && fingerprint) {
-      return `${titlePart}::${fingerprint}`;
-    }
-    return prefix || titlePart || fingerprint || "active_question";
+    return prefix || titlePart || "active_question";
   }
 
   // Token-Saver: Check if question is already answered on screen
@@ -1888,37 +1675,13 @@
     )).filter(isElementVisible);
     if (placedChips.length > 0) return true;
 
-    // 3b. Rearrange destination container containing placed chips or text
-    const dest = findDestinationContainer(scope) || findDestinationContainer(document.body);
-    if (dest) {
-      const destText = safeText(dest).toLowerCase();
-      const cleanedDest = destText
-        .replace(/your\s+(sentence|story|passage|answer|response)/g, "")
-        .replace(/tap\s+chips\s+below\s+to\s+build\s+your\s+answer/g, "")
-        .replace(/tap\s+chips\s+below/g, "")
-        .replace(/tap\s+words\s+below/g, "")
-        .replace(/build\s+your\s+answer/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-      if (cleanedDest.length > 3) return true;
-    }
-
     // 4. Populated text inputs
     const textInputs = Array.from(scope.querySelectorAll("input[type='text'], textarea:not(.gemini-input)")).filter(isElementVisible);
     if (textInputs.some(inp => (inp.value || "").trim().length > 0)) return true;
 
-    // 4b. Contenteditable or rich text editor
-    const editables = Array.from(scope.querySelectorAll("[contenteditable='true'], [role='textbox'], .ql-editor, div.editable")).filter(isElementVisible);
-    if (editables.some(el => (el.innerText || el.textContent || "").trim().length > 0)) return true;
-
     // 5. Selected dropdowns
     const dropdowns = Array.from(scope.querySelectorAll("select")).filter(isElementVisible);
     if (dropdowns.some(sel => sel.selectedIndex > 0 && sel.value !== "")) return true;
-
-    // Fallback: If not found in scope, re-check document.body
-    if (scope !== document.body) {
-      return hasAnyAnswerSelectedInDOM(document.body);
-    }
 
     return false;
   }
@@ -1995,29 +1758,6 @@
       });
       try { tgt.click(); } catch (_) {}
     });
-  }
-
-  // Single-dispatch click for rearrange chips/tokens to prevent framework double-activation
-  function clickChipToken(element) {
-    if (!element) return;
-    const target = element.closest("button, [role='button'], [class*='chip' i], [class*='token' i], [class*='pill' i], [class*='item' i]") || element;
-    try { target.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (_) {}
-    highlightElement(target);
-
-    try {
-      if (typeof PointerEvent !== "undefined") {
-        target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, view: window, pointerId: 1, pointerType: "mouse", isPrimary: true }));
-      }
-    } catch (_) {}
-    try { target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window })); } catch (_) {}
-    try {
-      if (typeof PointerEvent !== "undefined") {
-        target.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, view: window, pointerId: 1, pointerType: "mouse", isPrimary: true }));
-      }
-    } catch (_) {}
-    try { target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window })); } catch (_) {}
-    try { target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); } catch (_) {}
-    try { target.click(); } catch (_) {}
   }
 
   function setElementValue(element, val) {
@@ -2284,21 +2024,14 @@
       return txt.startsWith("reset");
     });
 
-    const initialBlanks = findClozeBlanks(document.body);
     const hasPlacedBlanks = (
-      initialBlanks.some(b => {
-        const txt = safeText(b).trim();
-        return txt.length > 0 && !/^\[?\s*blank\s*\d*\s*\]?$/i.test(txt) && !/^_{1,}$/.test(txt);
-      }) ||
       document.querySelectorAll("[class*='blank' i] [class*='chip' i], [class*='slot' i] [class*='chip' i]").length > 0 ||
-      document.querySelectorAll("[class*='chip' i].selected, [class*='token' i].selected").length > 0
+      document.querySelectorAll("[class*='chip' i].selected").length > 0
     );
 
     if (resetBtn && hasPlacedBlanks) {
-      console.log("[Step Solver] Cloze board contains placed blanks. Clicking Reset for clean placement...");
-      try { resetBtn.click(); } catch (_) {}
       simulateClick(resetBtn);
-      await delay(350);
+      await delay(180);
     }
 
     // Extract ordered words from Gemini response
@@ -2335,50 +2068,27 @@
 
       // 1. Fresh query for live blank slots in reading order
       const liveBlanks = findClozeBlanks(document.body);
-      const targetBlank = liveBlanks[i] || liveBlanks.find(b => {
-        const txt = safeText(b).trim();
-        return txt.length === 0 || /^\[?\s*blank\s*\d*\s*\]?$/i.test(txt) || /^_{1,}$/.test(txt);
-      }) || null;
+      const targetBlank = liveBlanks[i] || null;
 
-      // Click and focus the blank slot first so StepTest activates the slot for placement
+      // Click the blank slot first to ensure StepTest focuses / selects this slot
       if (targetBlank) {
         try {
           if (typeof targetBlank.focus === "function") targetBlank.focus();
-          targetBlank.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          targetBlank.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-          targetBlank.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
-          targetBlank.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-          if (typeof targetBlank.click === "function") targetBlank.click();
-          await delay(120);
+          simulateClick(targetBlank);
+          targetBlank.dispatchEvent(new Event("focus", { bubbles: true }));
+          await delay(100);
         } catch (_) {}
       }
 
       // 2. Fresh query for live unplaced chips
       const liveChips = findClozeChips(document.body);
-      let matchingChip = liveChips.find(c => cleanString(c.text) === cleanTarget)
-        || liveChips.find(c => {
-          const ct = cleanString(c.text);
-          return ct.startsWith(cleanTarget) || cleanTarget.startsWith(ct);
-        })
-        || liveChips.find(c => {
-          const ct = cleanString(c.text);
-          return ct.includes(cleanTarget) || cleanTarget.includes(ct);
-        });
-
-      // Word Token Overlap Match (for dialogue sentences)
-      if (!matchingChip && liveChips.length > 0) {
-        const targetWords = cleanTarget.split(" ").filter(w => w.length > 2);
-        let bestScore = -1;
-        for (const c of liveChips) {
-          const chipWords = cleanString(c.text).split(" ").filter(w => w.length > 2);
-          const common = chipWords.filter(w => targetWords.includes(w));
-          const score = common.length / Math.max(chipWords.length, targetWords.length);
-          if (score > bestScore && score >= 0.4) {
-            bestScore = score;
-            matchingChip = c;
-          }
-        }
-      }
+      let matchingChip = liveChips.find(c => {
+        const cleanChip = cleanString(c.text);
+        return cleanChip === cleanTarget;
+      }) || liveChips.find(c => {
+        const cleanChip = cleanString(c.text);
+        return cleanChip.includes(cleanTarget) || cleanTarget.includes(cleanChip);
+      });
 
       // Fallback search across visible candidate elements
       if (!matchingChip) {
@@ -2394,7 +2104,7 @@
       }
 
       if (matchingChip && matchingChip.element) {
-        clickChipToken(matchingChip.element);
+        simulateClick(matchingChip.element);
         placedCount++;
         placedLabels.push(`${i + 1}: ${matchingChip.text}`);
 
@@ -2403,7 +2113,7 @@
           setElementValue(targetBlank, matchingChip.text);
         }
 
-        await delay(Math.max(350, state.typingDelayMs || 250));
+        await delay(Math.max(250, state.typingDelayMs || 250));
       }
     }
 
@@ -2479,16 +2189,7 @@
       return txt === "reset" || txt.startsWith("reset");
     });
 
-    const destBox = findDestinationContainer(container || document.body);
-    const destHasPlacedChips = destBox && Array.from(destBox.querySelectorAll("*")).some(el => {
-      if (!isElementVisible(el)) return false;
-      const txt = safeText(el).trim().toLowerCase();
-      if (!txt || txt === "your sentence" || txt === "your answer" || txt === "your story" || txt === "your passage" || txt === "your response") return false;
-      if (txt.includes("tap chips below") || txt.includes("tap words below") || txt.includes("build your answer")) return false;
-      return true;
-    });
-
-    const hasPlacedChips = destHasPlacedChips || (
+    const hasPlacedChips = (
       document.querySelectorAll("[class*='slot' i] [class*='chip' i], [class*='slot' i] span, .word-slot:not(:empty)").length > 0 ||
       document.querySelectorAll("[class*='chip' i].selected, [class*='token' i].selected, [class*='phrase' i].selected").length > 0 ||
       document.querySelectorAll(".selected-chip, .placed-token, [data-placed='true']").length > 0
@@ -2496,17 +2197,17 @@
 
     if (resetBtn && hasPlacedChips) {
       console.log("[Gemini Live] Resetting rearrange slots to ensure clean insertion...");
-      try { resetBtn.click(); } catch (_) {}
       simulateClick(resetBtn);
-      await delay(400);
+      await delay(350);
     }
 
-    // Fresh query of tokens from Word Bank
-    let tokens = findRearrangeTokens(container);
+    // Prefer domRefs.sentenceTokens if connected (ground truth matched to Gemini index), else scan
+    let tokens = (domRefs?.sentenceTokens?.length >= 3 && domRefs.sentenceTokens.every(t => t.element && t.element.isConnected))
+      ? domRefs.sentenceTokens
+      : findRearrangeTokens(container);
+
     if (!tokens || tokens.length === 0) {
-      tokens = (domRefs?.sentenceTokens?.length >= 3 && domRefs.sentenceTokens.every(t => t.element && t.element.isConnected))
-        ? domRefs.sentenceTokens
-        : [];
+      tokens = domRefs && domRefs.sentenceTokens && domRefs.sentenceTokens.length > 0 ? domRefs.sentenceTokens : [];
     }
     if (!tokens || tokens.length === 0) {
       tokens = findRearrangeTokens(document.body);
@@ -2523,9 +2224,8 @@
         .toLowerCase()
         // Strip leading numbering e.g. "1. ", "A) ", "(1) ", "Sentence 1: "
         .replace(/^(?:(?:\d+|[a-z])[\.\)\-:]|\((?:\d+|[a-z])\)|(?:sentence|phrase|clause)\s*\d+[:\-]?)\s*/i, "")
-        // Strip quotes cleanly and replace remaining punctuation with spaces
-        .replace(/[“’”'"]/g, "")
-        .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, " ")
+        // Strip punctuation and quotes
+        .replace(/[“’”".,\/#!$%\^&\*;:{}=\-_`~()?]/g, " ")
         .replace(/\s+/g, " ")
         .trim();
     }
@@ -2740,56 +2440,16 @@
 
     console.log("[Gemini Live] Clicking rearrange tokens in order:", orderedSequence.map(t => `[${t.index}] ${t.text.slice(0, 30)}...`));
 
-    let clickedCount = 0;
-    const clickedElements = new Set();
-    const currentDest = findDestinationContainer(container || document.body);
-
     // Sequentially click each token in order
     for (const token of orderedSequence) {
-      const cleanTarget = normalizeTokenText(token.text);
-      // Query fresh live unplaced tokens from Word Bank
-      const freshTokens = findRearrangeTokens(container);
-      let targetEl = freshTokens.find(ft => !clickedElements.has(ft.element) && normalizeTokenText(ft.text) === cleanTarget)?.element;
-
-      if (!targetEl) {
-        // Fallback: check document.body fresh tokens
-        const bodyTokens = findRearrangeTokens(document.body);
-        targetEl = bodyTokens.find(bt => !clickedElements.has(bt.element) && normalizeTokenText(bt.text) === cleanTarget)?.element;
-      }
-
-      if (!targetEl) {
-        // Fallback: prefix or substring match among fresh unclicked tokens
-        targetEl = freshTokens.find(ft => {
-          if (clickedElements.has(ft.element)) return false;
-          const ct = normalizeTokenText(ft.text);
-          return ct.startsWith(cleanTarget) || cleanTarget.startsWith(ct) || ct.includes(cleanTarget) || cleanTarget.includes(ct);
-        })?.element;
-      }
-
-      if (!targetEl && token.element && token.element.isConnected) {
-        if (!currentDest || !currentDest.contains(token.element)) {
-          if (!clickedElements.has(token.element)) {
-            targetEl = token.element;
-          }
-        }
-      }
-
-      if (targetEl && isElementVisible(targetEl) && !clickedElements.has(targetEl)) {
-        clickedElements.add(targetEl);
-        clickChipToken(targetEl);
-        clickedCount++;
-        await delay(Math.max(350, state.typingDelayMs || 250));
-      }
+      simulateClick(token.element);
+      await delay(Math.max(300, state.typingDelayMs || 250));
     }
 
     const fullSentence = solution.reconstructed_sentence || orderedSequence.map(t => t.text).join(" ");
     showAnswerBanner(fullSentence, solution.explanation || "Rearranged into logical sequence", "Sentence Rearranged", 15000);
 
-    return {
-      success: clickedCount >= Math.min(tokens.length, 3),
-      clickedCount: clickedCount,
-      message: `Ordered ${clickedCount} sentence/phrase token(s): "${fullSentence.slice(0, 60)}..."`
-    };
+    return { success: true, message: `Ordered ${orderedSequence.length} items: "${fullSentence.slice(0, 60)}..."`, clickedCount: orderedSequence.length };
   }
 
   // Solve Writing Question
@@ -3033,9 +2693,6 @@
         simulateClick(nextBtn);
         await delay(1500);
         isAutoNextClicking = false;
-        state.isProcessing = false;
-        state.lastSolvedQuestionId = "";
-        state.inFlightQuestionId = null;
       } else {
         console.warn("[Step Solver] Auto-Next: Next button not found or disabled after 2s.");
       }
@@ -3579,9 +3236,9 @@
       if (tokens && tokens.length > 0) {
         for (const tok of tokens) {
           if (tok && tok.element && isElementVisible(tok.element)) {
-            clickChipToken(tok.element);
+            simulateClick(tok.element);
             placedCount++;
-            await delay(Math.max(200, state.typingDelayMs || 250));
+            await delay(Math.max(150, state.typingDelayMs || 250));
           }
         }
       }
@@ -3632,13 +3289,6 @@
         if (state.autoSubmitEnabled) {
           handleAutoNext();
         }
-        return;
-      }
-
-      // CRITICAL: Ensure we are inside an active test / exercise page before attempting to solve
-      if (!isQuestionOrTestActive()) {
-        console.log("[Step Solver] No submit/reset/test button found. Page is not an active test/question.");
-        updateStatus("Ready", "idle", "READY");
         return;
       }
 
@@ -3939,15 +3589,7 @@
     if (autoWatchInterval) clearInterval(autoWatchInterval);
 
     state.observer = new MutationObserver(() => {
-      if (!state.isEnabled || !state.isAutoWatch) return;
-      if (state.isProcessing) {
-        if (Date.now() - state.lastSolveTimestamp > 8000) {
-          console.warn("[Step Solver] Watchdog: Recovering stuck processing state in observer...");
-          state.isProcessing = false;
-        } else {
-          return;
-        }
-      }
+      if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
       clearTimeout(autoWatchDebounce);
       autoWatchDebounce = setTimeout(() => {
         if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
@@ -3958,7 +3600,6 @@
           }
           return;
         }
-        if (!isQuestionOrTestActive()) return;
         handleAutoPlayVideo();
         const container = findActiveQuestionContainer();
         if (!container) return;
@@ -3967,7 +3608,7 @@
         if (currentId && !state.solvedQuestionIds.has(currentId) && currentId !== state.lastSolvedQuestionId) {
           triggerSolve(true);
         }
-      }, 600);
+      }, 1200);
     });
 
     state.observer.observe(document.body, {
@@ -3975,17 +3616,9 @@
       subtree: true
     });
 
-    // Also check every 1.5 seconds to detect if user advanced to next question
+    // Also check every 2 seconds to detect if user advanced to next question
     autoWatchInterval = setInterval(() => {
-      if (!state.isEnabled || !state.isAutoWatch) return;
-      if (state.isProcessing) {
-        if (Date.now() - state.lastSolveTimestamp > 8000) {
-          console.warn("[Step Solver] Watchdog: Recovering stuck processing state in interval...");
-          state.isProcessing = false;
-        } else {
-          return;
-        }
-      }
+      if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
       if (isAnswerOrFeedbackPage()) {
         hideAnswerBanner();
         if (state.autoSubmitEnabled) {
@@ -3993,7 +3626,6 @@
         }
         return;
       }
-      if (!isQuestionOrTestActive()) return;
       const container = findActiveQuestionContainer();
       if (!container) return;
       const data = extractQuestionData(container);
@@ -4001,7 +3633,7 @@
       if (currentId && !state.solvedQuestionIds.has(currentId) && currentId !== state.lastSolvedQuestionId) {
         triggerSolve(true);
       }
-    }, 1500);
+    }, 2000);
   }
 
   function stopAutoWatcher() {
