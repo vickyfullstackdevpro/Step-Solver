@@ -1,6 +1,6 @@
 {
   "name": "step-solver-extension",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Step Solver Chrome & Edge Extension with automated regression testing",
   "main": "background.js",
   "scripts": {
