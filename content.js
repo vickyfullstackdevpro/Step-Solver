@@ -957,18 +957,59 @@
     return blanks;
   }
 
+  // Helper to find the destination container (YOUR SENTENCE / YOUR STORY / YOUR ANSWER)
+  function findDestinationContainer() {
+    const allEls = Array.from(document.querySelectorAll("*")).filter(isElementVisible);
+    for (const el of allEls) {
+      if (isNavOrSystem(el)) continue;
+      const t = safeText(el).trim().toLowerCase();
+      if (
+        t === "your sentence" ||
+        t === "your answer" ||
+        t === "your story" ||
+        t === "your passage" ||
+        t === "your response" ||
+        t.startsWith("your sentence")
+      ) {
+        const box = el.closest("fieldset, [class*='sentence' i], [class*='answer' i], [class*='box' i], [class*='drop' i], [class*='target' i], [class*='board' i], [class*='container' i], div");
+        return box || el.parentElement;
+      }
+    }
+    return null;
+  }
+
+  // Helper to find the Word Bank container
+  function findWordBankContainer() {
+    const allEls = Array.from(document.querySelectorAll("*")).filter(isElementVisible);
+    for (const el of allEls) {
+      if (isNavOrSystem(el)) continue;
+      const t = safeText(el).trim().toLowerCase();
+      if (
+        t === "word bank" ||
+        t === "phrase bank" ||
+        t === "words to arrange" ||
+        t === "word list" ||
+        t === "words"
+      ) {
+        const box = el.closest("fieldset, [class*='bank' i], [class*='words' i], [class*='pool' i], [class*='source' i], [class*='box' i], [class*='container' i], div");
+        return { header: el, container: box || el.parentElement };
+      }
+    }
+    return null;
+  }
+
   // Check if current question is a Sentence / Phrase Rearrangement question
   function checkIsRearrangeQuestion(container) {
     const scope = (container && container !== document.body) ? container : document.body;
-    const pageText = (safeText(scope) + " " + (document.body ? safeText(document.body) : "")).toLowerCase();
+    const bodyText = ((scope ? safeText(scope) : "") + " " + (document.body ? safeText(document.body) : "")).toLowerCase();
 
     // Must NOT be a cloze passage question
     const hasClozeKeywords = (
-      pageText.includes("fill in the blanks with suitable words") ||
-      pageText.includes("complete the passage") ||
-      pageText.includes("passage in a logical sequence") ||
-      pageText.includes("fill in the blank above") ||
-      pageText.includes("choices below")
+      bodyText.includes("fill in the blanks with suitable words") ||
+      bodyText.includes("complete the passage") ||
+      bodyText.includes("passage in a logical sequence") ||
+      bodyText.includes("fill in the blank above") ||
+      bodyText.includes("choices below")
     );
     if (hasClozeKeywords) return false;
 
@@ -978,33 +1019,42 @@
 
     // CRITICAL: "Fill in the blank" / "Choose the correct" questions are NEVER sentence rearrangements!
     const isFillBlankOrChoose = (
-      pageText.includes("fill in the blank") ||
-      pageText.includes("fill in the blanks") ||
-      pageText.includes("fill in the missing") ||
-      pageText.includes("select the best answer") ||
-      pageText.includes("choose the best") ||
-      pageText.includes("choose the correct") ||
-      pageText.includes("select the correct") ||
-      pageText.includes("select the suitable") ||
-      pageText.includes("choose the suitable") ||
-      pageText.includes("best answer from the following")
+      bodyText.includes("fill in the blank") ||
+      bodyText.includes("fill in the blanks") ||
+      bodyText.includes("fill in the missing") ||
+      bodyText.includes("select the best answer") ||
+      bodyText.includes("choose the best") ||
+      bodyText.includes("choose the correct") ||
+      bodyText.includes("select the correct") ||
+      bodyText.includes("select the suitable") ||
+      bodyText.includes("choose the suitable") ||
+      bodyText.includes("best answer from the following")
     );
 
     const hasRearrangeKeywords = (
-      pageText.includes("rearrange the words or phrases") ||
-      pageText.includes("rearrange the phrases") ||
-      pageText.includes("rearrange the words") ||
-      pageText.includes("rearrange words") ||
-      pageText.includes("rearrange phrases") ||
-      pageText.includes("rearrange the sentence") ||
-      pageText.includes("arrange the following sentences") ||
-      pageText.includes("arrange the sentences") ||
-      pageText.includes("arrange sentences") ||
-      pageText.includes("arrange the words") ||
-      pageText.includes("arrange the phrases") ||
-      pageText.includes("form a logical sentence") ||
-      pageText.includes("form a sentence") ||
-      (pageText.includes("rearrange") && pageText.includes("read it aloud"))
+      bodyText.includes("rearrange the words or phrases") ||
+      bodyText.includes("rearrange the phrases") ||
+      bodyText.includes("rearrange the words") ||
+      bodyText.includes("rearrange words") ||
+      bodyText.includes("rearrange phrases") ||
+      bodyText.includes("rearrange the sentence") ||
+      bodyText.includes("rearrange the sentences") ||
+      bodyText.includes("rearrange the following sentences") ||
+      bodyText.includes("rearrange sentences") ||
+      bodyText.includes("arrange the following sentences") ||
+      bodyText.includes("arrange the following") ||
+      bodyText.includes("arrange the sentences") ||
+      bodyText.includes("arrange sentences") ||
+      bodyText.includes("arrange the words") ||
+      bodyText.includes("arrange the phrases") ||
+      bodyText.includes("in the correct sequence") ||
+      bodyText.includes("in the correct order") ||
+      bodyText.includes("form a logical sentence") ||
+      bodyText.includes("form sentences") ||
+      bodyText.includes("form a sentence") ||
+      (bodyText.includes("word bank") && (bodyText.includes("your sentence") || bodyText.includes("your story") || bodyText.includes("your passage") || bodyText.includes("your answer"))) ||
+      (bodyText.includes("rearrange") && bodyText.includes("read it aloud")) ||
+      findWordBankContainer() !== null
     );
 
     if (isFillBlankOrChoose && !hasRearrangeKeywords) {
@@ -1017,7 +1067,7 @@
     const hasVisibleResetBtn = Array.from(document.querySelectorAll("button, a, input, div, span, [role='button']"))
       .some(b => isElementVisible(b) && !isNavOrSystem(b) && safeText(b).toLowerCase().startsWith("reset"));
 
-    const hasSlotDashes = (pageText.includes("——") || pageText.includes("––") || pageText.includes("— —")) && (pageText.includes("“") || pageText.includes("”"));
+    const hasSlotDashes = (bodyText.includes("——") || bodyText.includes("––") || bodyText.includes("— —")) && (bodyText.includes("“") || bodyText.includes("”"));
     if (hasVisibleResetBtn && hasSlotDashes) {
       return true;
     }
@@ -1030,20 +1080,53 @@
     const tokens = [];
     const seen = new Set();
     const scope = (container && container !== document.body && container.querySelectorAll("*").length > 5) ? container : document.body;
+    const destContainer = findDestinationContainer();
 
     function isValidChip(el) {
       if (!el || !isElementVisible(el) || el.closest("#gemini-live-host, header, nav, video, iframe, .ytp-chrome-bottom")) return false;
-      const txt = safeText(el);
-      if (!txt || txt.length < 1 || txt.length > 450) return false;
+
+      // CRITICAL: Chips already inside or belonging to the destination box (YOUR SENTENCE / YOUR STORY) are NOT available tokens
+      if (destContainer && (el === destContainer || destContainer.contains(el))) return false;
+
+      const txt = safeText(el).trim();
+      if (!txt || txt.length < 1 || txt.length > 500) return false;
       const lower = txt.toLowerCase();
-      if (/^(reset|submit|next|replay|play|save|continue|grade|abc|record|speak|mic|listen)\b/i.test(lower)) return false;
+
+      // System / UI navigation words
+      if (/^(reset|submit|next|replay|play|save|continue|grade|abc|record|speak|mic|listen|share|subscribe)\b/i.test(lower)) return false;
+
+      // Question instructions and labels
       if (lower.startsWith("rearrange the words or phrases")) return false;
       if (lower.startsWith("arrange the following sentences")) return false;
+      if (lower.startsWith("rearrange the following sentences")) return false;
+      if (lower.startsWith("arrange the sentences")) return false;
+      if (lower.startsWith("rearrange the sentence")) return false;
+      if (lower.startsWith("rearrange words")) return false;
+      if (lower.startsWith("rearrange phrases")) return false;
       if (lower.startsWith("form a logical sentence")) return false;
-      if (lower.startsWith("if the video is not loading")) return false;
+      if (lower.startsWith("form sentences")) return false;
+      if (lower.startsWith("form a sentence")) return false;
+
+      // Filter contextual prompts containing rearrange instructions
+      if (lower.includes("arrange the following sentences") || lower.includes("rearrange the following sentences")) return false;
+      if (lower.includes("in the correct sequence to see") || lower.includes("in the correct sequence")) return false;
+      if (lower.includes("rearrange the words or phrases") || lower.includes("form a logical sentence")) return false;
+
+      // Video & helper labels
+      if (lower.includes("if the video is not loading")) return false;
+      if (lower === "click here" || lower.startsWith("click here")) return false;
+      if (lower.includes("watch on youtube") || lower.includes("step - the hindu group")) return false;
       if (lower.includes("record your answer using your microphone")) return false;
       if (lower.includes("form sentences that express opinion")) return false;
       if (/^\d{1,2}:\d{2}/.test(lower)) return false; // timecode
+
+      // StepTest UI Headers & Subtext
+      if (lower === "your sentence" || lower === "your answer" || lower === "your story" || lower === "your passage" || lower === "your response") return false;
+      if (lower === "word bank" || lower === "phrase bank" || lower === "word list" || lower === "words" || lower === "words to arrange") return false;
+      if (lower.includes("tap chips below") || lower.includes("tap words below") || lower.includes("build your answer")) return false;
+      if (lower.includes("tap on the words") || lower.includes("tap to build")) return false;
+
+      // Punctuation, blanks & slots
       if (el.matches("button[type='submit'], input[type='submit']")) return false;
       if (txt.includes("“") || txt.includes("”")) return false; // slot container quotes
       if (/^[—–\-_.\s]+$/.test(txt)) return false; // slot lines or dashes
@@ -1058,7 +1141,49 @@
       return !hasChipChild;
     }
 
-    // Strategy 0: Find instruction anchor within the current question scope
+    // Strategy 0: Word Bank Section (Highest priority match for StepTest Word Bank)
+    const wordBankInfo = findWordBankContainer();
+    if (wordBankInfo) {
+      const allElements = Array.from(document.querySelectorAll("*")).filter(isElementVisible);
+      const bankHeaderIdx = allElements.indexOf(wordBankInfo.header);
+
+      let endIdx = -1;
+      const resetBtn = allElements.find((el, idx) => {
+        if (idx <= bankHeaderIdx || isNavOrSystem(el)) return false;
+        const txt = safeText(el).toLowerCase().trim();
+        return txt === "reset" || txt.startsWith("reset");
+      });
+
+      if (resetBtn) {
+        endIdx = allElements.indexOf(resetBtn);
+      } else {
+        const boundaryBtn = allElements.findIndex((el, idx) => {
+          if (idx <= bankHeaderIdx) return false;
+          const txt = safeText(el).toLowerCase().trim();
+          return (txt === "submit" || txt === "next") && el.matches("button, input, [role='button']");
+        });
+        endIdx = boundaryBtn !== -1 ? boundaryBtn : allElements.length;
+      }
+
+      if (bankHeaderIdx !== -1) {
+        for (let i = bankHeaderIdx + 1; i < endIdx; i++) {
+          const el = allElements[i];
+          if (isLeafChip(el) && !seen.has(el)) {
+            const t = safeText(el).trim();
+            seen.add(el);
+            tokens.push({
+              element: el,
+              index: tokens.length,
+              id: `token_${tokens.length}`,
+              text: t
+            });
+          }
+        }
+        if (tokens.length >= 3) return tokens;
+      }
+    }
+
+    // Strategy 0b: Find instruction anchor within the current question scope
     const allLabels = Array.from(scope.querySelectorAll("*")).filter(el => isElementVisible(el) && !isNavOrSystem(el));
     const matchingAnchors = allLabels.filter(el => {
       const t = safeText(el).toLowerCase();
@@ -1167,7 +1292,7 @@
     }
 
     // Strategy C: Fallback to document.body
-    if (tokens.length === 0 && scope !== document.body) {
+    if (tokens.length < 3 && scope !== document.body) {
       return findRearrangeTokens(document.body);
     }
 
@@ -1178,9 +1303,11 @@
   function findMCQOptions(container) {
     const scope = (container && container !== document.body) ? container : document.body;
 
-    // CRITICAL: Only suppress MCQ options if confirmed interactive chips/tokens exist for Cloze or Rearrange!
+    // CRITICAL: If this is a rearrange or cloze question, NEVER extract options as MCQ!
     if (
-      (checkIsRearrangeQuestion(scope) && findRearrangeTokens(scope).length >= 3) ||
+      checkIsRearrangeQuestion(scope) ||
+      findWordBankContainer() !== null ||
+      findRearrangeTokens(scope).length >= 3 ||
       (checkIsClozePassage(scope) && findClozeChips(scope).length >= 2 && findClozeBlanks(scope).length >= 2)
     ) {
       return [];
@@ -1428,12 +1555,15 @@
     let sentenceTokens = [];
     if (isRearrange) {
       sentenceTokens = findRearrangeTokens(container);
+      if (sentenceTokens.length < 3) {
+        sentenceTokens = findRearrangeTokens(document.body);
+      }
     }
-    // Question is rearrangement ONLY if rearrange keywords/Reset exist AND at least 3 visible chips are found
-    const finalIsRearrange = isRearrange && sentenceTokens.length >= 3;
+    // Question is rearrangement if rearrange keywords/containers exist or 3+ chips are found
+    const finalIsRearrange = (isRearrange || findWordBankContainer() !== null) && sentenceTokens.length >= 3;
 
     // 4. Identify Options (Disabled for cloze and rearrange questions)
-    const options = (finalIsCloze || finalIsRearrange) ? [] : findMCQOptions(container);
+    const options = (finalIsCloze || finalIsRearrange || isRearrange || findWordBankContainer() !== null) ? [] : findMCQOptions(container);
 
     // 5. Identify Dropdowns
     const dropdowns = [];
@@ -1521,7 +1651,7 @@
       detectedType = "cloze_passage";
     } else if (finalIsWriting) {
       detectedType = "writing";
-    } else if (finalIsRearrange) {
+    } else if (finalIsRearrange || isRearrange || findWordBankContainer() !== null) {
       detectedType = "rearrange_sentence";
     } else if (options.length > 0) {
       detectedType = "mcq";
@@ -1731,8 +1861,9 @@
       );
 
       if (input) targets.add(input);
-      if (clickableContainer) targets.add(clickableContainer);
-      if (element.parentElement && element.parentElement !== document.body) {
+      if (clickableContainer) {
+        targets.add(clickableContainer);
+      } else if (element.parentElement && element.parentElement !== document.body) {
         targets.add(element.parentElement);
       }
 
@@ -1758,6 +1889,31 @@
       });
       try { tgt.click(); } catch (_) {}
     });
+  }
+
+  // Dedicated single-target click for rearrange / cloze chips to prevent duplicate insertions
+  function clickChipToken(element) {
+    if (!element) return;
+    try { element.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) {}
+    highlightElement(element);
+
+    const chipTarget = element.closest("button, [role='button'], [class*='chip' i], [class*='token' i], [class*='pill' i]") || element;
+
+    const clickEvents = ["pointerdown", "mousedown", "pointerup", "mouseup", "click"];
+    clickEvents.forEach(evtName => {
+      try {
+        if (evtName.startsWith("pointer") && typeof PointerEvent !== "undefined") {
+          chipTarget.dispatchEvent(new PointerEvent(evtName, { bubbles: true, cancelable: true, view: window, pointerId: 1, pointerType: "mouse", isPrimary: true }));
+        } else {
+          chipTarget.dispatchEvent(new MouseEvent(evtName, { bubbles: true, cancelable: true, view: window }));
+        }
+      } catch (_) {}
+    });
+    try {
+      if (typeof chipTarget.click === "function") {
+        chipTarget.click();
+      }
+    } catch (_) {}
   }
 
   function setElementValue(element, val) {
@@ -2189,7 +2345,14 @@
       return txt === "reset" || txt.startsWith("reset");
     });
 
+    const yourSentenceBox = findYourSentenceContainer();
+    const hasChipsInSentenceBox = yourSentenceBox ? Array.from(yourSentenceBox.children).some(child => {
+      const txt = (child.innerText || child.textContent || "").trim().toLowerCase();
+      return txt && !txt.includes("tap chips below") && !txt.includes("your sentence") && txt.length > 2;
+    }) : false;
+
     const hasPlacedChips = (
+      hasChipsInSentenceBox ||
       document.querySelectorAll("[class*='slot' i] [class*='chip' i], [class*='slot' i] span, .word-slot:not(:empty)").length > 0 ||
       document.querySelectorAll("[class*='chip' i].selected, [class*='token' i].selected, [class*='phrase' i].selected").length > 0 ||
       document.querySelectorAll(".selected-chip, .placed-token, [data-placed='true']").length > 0
@@ -2198,11 +2361,11 @@
     if (resetBtn && hasPlacedChips) {
       console.log("[Gemini Live] Resetting rearrange slots to ensure clean insertion...");
       simulateClick(resetBtn);
-      await delay(350);
+      await delay(400);
     }
 
-    // Prefer domRefs.sentenceTokens if connected (ground truth matched to Gemini index), else scan
-    let tokens = (domRefs?.sentenceTokens?.length >= 3 && domRefs.sentenceTokens.every(t => t.element && t.element.isConnected))
+    // Prefer domRefs.sentenceTokens if connected and no reset occurred, else scan
+    let tokens = (domRefs?.sentenceTokens?.length >= 3 && !hasPlacedChips && domRefs.sentenceTokens.every(t => t.element && t.element.isConnected))
       ? domRefs.sentenceTokens
       : findRearrangeTokens(container);
 
@@ -2440,10 +2603,22 @@
 
     console.log("[Gemini Live] Clicking rearrange tokens in order:", orderedSequence.map(t => `[${t.index}] ${t.text.slice(0, 30)}...`));
 
-    // Sequentially click each token in order
+    // Sequentially click each token in order using dedicated chip clicker
     for (const token of orderedSequence) {
-      simulateClick(token.element);
-      await delay(Math.max(300, state.typingDelayMs || 250));
+      let elToClick = token.element;
+      // If detached or not connected to DOM, dynamically re-query fresh matching chip from WORD BANK
+      if (!elToClick || !elToClick.isConnected) {
+        const liveTokens = findRearrangeTokens(container);
+        const normTarget = normalizeTokenText(token.text);
+        const match = liveTokens.find(lt => normalizeTokenText(lt.text) === normTarget);
+        if (match && match.element) {
+          elToClick = match.element;
+        }
+      }
+      if (elToClick) {
+        clickChipToken(elToClick);
+      }
+      await delay(Math.max(350, state.typingDelayMs || 300));
     }
 
     const fullSentence = solution.reconstructed_sentence || orderedSequence.map(t => t.text).join(" ");
