@@ -560,6 +560,7 @@
 
   function findActiveQuestionContainer() {
     if (isAnswerOrFeedbackPage()) return null;
+    if (!isQuestionOrTestActive()) return null;
     const meta = getCurrentQuestionMeta();
     const currentNum = meta.currentNum;
 
@@ -733,6 +734,30 @@
     return isAnswerOrFeedbackPage();
   }
 
+  // Check if current page is an active test/question flow
+  // User rule: Check only for the question if submit (or test action) button exists; if not means ignore (e.g. on home / course dashboard)
+  function isQuestionOrTestActive() {
+    const url = (window.location.href || "").toLowerCase();
+    const isCourseOverview = (url.includes("/courses/") || url.includes("/dashboard") || url.includes("/home") || url.includes("/my-courses")) &&
+      !url.includes("/take") && !url.includes("/attempt") && !url.includes("/test") && !url.includes("/quiz") && !url.includes("/assessment");
+
+    const hasSubmitBtn = typeof findActionElement === "function" ? !!findActionElement("submit") : false;
+    const hasResetBtn = Array.from(document.querySelectorAll("button, a, input, div[role='button']"))
+      .some(b => isElementVisible(b) && !isNavOrSystem(b) && safeText(b).toLowerCase().startsWith("reset"));
+    const hasNextBtn = typeof findActionElement === "function" ? !!findActionElement("next") : false;
+    const hasStartBtn = typeof findActionElement === "function" ? !!findActionElement("start") : false;
+
+    // If submit button or reset button exists, this is an active question
+    if (hasSubmitBtn || hasResetBtn) return true;
+
+    // If answer/feedback page with next button, or test start screen, it's valid test flow
+    if (hasNextBtn && isAnswerOrFeedbackPage()) return true;
+    if (hasStartBtn) return true;
+
+    // Otherwise, if no submit/reset/test button exists (e.g. on course overview or dashboard), ignore
+    return false;
+  }
+
   // Check if current question is a Cloze / Multi-Blank Passage Question
   function checkIsClozePassage(container) {
     const scope = (container && container !== document.body) ? container : document.body;
@@ -762,8 +787,19 @@
       return false;
     }
 
-    // Exclude single-choice questions (e.g. "1. Fill in the blank", "best answer from the following", "fill in the blank with the best answer")
-    const isSingleChoicePrompt = (
+    // Exclude single-choice questions ONLY if not explicitly a multi-blank prompt
+    const isMultipleBlankPrompt = (
+      pageText.includes("fill in the blanks") ||
+      pageText.includes("fill in each blank") ||
+      pageText.includes("words for the blanks") ||
+      pageText.includes("read the conversation, fill in the blanks") ||
+      pageText.includes("complete an apology letter") ||
+      pageText.includes("to complete an apology letter") ||
+      pageText.includes("complete the letter") ||
+      pageText.includes("complete the conversation")
+    );
+
+    const isSingleChoicePrompt = !isMultipleBlankPrompt && (
       pageText.includes("fill in the blank with the best answer") ||
       pageText.includes("fill in the blank with the correct") ||
       pageText.includes("best answer from the following") ||
@@ -779,10 +815,12 @@
     }
 
     const hasClozeKeywords = (
+      isMultipleBlankPrompt ||
       pageText.includes("words for the blanks") ||
       pageText.includes("choosing the correct words") ||
       pageText.includes("words that best complete") ||
       pageText.includes("fill in the blanks with suitable words") ||
+      pageText.includes("fill in the blanks with the correct words") ||
       pageText.includes("fill in the blanks with words") ||
       pageText.includes("fill in the blanks") ||
       pageText.includes("fill in each blank") ||
@@ -790,7 +828,8 @@
       pageText.includes("complete the passage") ||
       pageText.includes("complete the airport announcement") ||
       pageText.includes("complete the announcement") ||
-      pageText.includes("passage in a logical sequence")
+      pageText.includes("passage in a logical sequence") ||
+      pageText.includes("record your responses")
     );
 
     const hasBlankDom = Array.from(document.querySelectorAll("[class*='blank' i], [class*='slot' i], [class*='drop' i], [class*='gap' i], [class*='target' i], [data-blank], [data-slot], [class*='droppable' i]"))
@@ -812,7 +851,7 @@
     function isValidChip(el) {
       if (!el || !isElementVisible(el) || el.closest("#gemini-live-host, #steptest-ai-banner, header, nav, video, iframe, .ytp-chrome-bottom")) return false;
       const txt = safeText(el);
-      if (!txt || txt.length < 1 || txt.length > 60) return false;
+      if (!txt || txt.length < 1 || txt.length > 400) return false;
       const lower = txt.toLowerCase();
       if (/^(reset|submit|next|replay|play|save|continue|grade)\b/i.test(lower)) return false;
       if (lower.startsWith("fill in the blank")) return false;
@@ -852,6 +891,10 @@
           t.includes("choices below") ||
           t.includes("from the choices") ||
           t.includes("words for the blanks") ||
+          t.includes("options below") ||
+          t.includes("read the conversation") ||
+          t.includes("record your responses") ||
+          t.includes("complete an apology letter") ||
           t.includes("complete the")
         ) {
           startIdx = i;
@@ -922,27 +965,40 @@
       return !/^(reset|submit|next)\b/i.test(t);
     });
 
-    // Also scan passage paragraphs for rounded empty inline boxes / drop zones
-    const paragraphs = Array.from(scope.querySelectorAll("p, div.passage, div.content, div.question-body, section")).filter(p => {
+    // Also scan passage paragraphs, conversation cards, and content blocks for rounded empty inline boxes / drop zones
+    const paragraphs = Array.from(scope.querySelectorAll("p, div, section, article, fieldset")).filter(p => {
       if (!isElementVisible(p) || isNavOrSystem(p)) return false;
+      if (p.closest("#gemini-live-host, #steptest-ai-banner, nav, header")) return false;
       const txt = safeText(p);
-      return txt.length > 20 && !txt.includes("14 of 14") && (txt.includes("delayed") || txt.includes("flight") || txt.includes("All") || txt.includes("check") || txt.includes("number"));
+      return txt.length > 15 && !/^\d+\s+of\s+\d+/i.test(txt);
     });
 
     for (const p of paragraphs) {
-      const inlineBoxes = Array.from(p.querySelectorAll("span, div, input")).filter(el => {
-        if (!isElementVisible(el) || blanks.includes(el) || el.closest("#gemini-live-host, #steptest-ai-banner")) return false;
+      const inlineBoxes = Array.from(p.querySelectorAll("span, div, input, a, button")).filter(el => {
+        if (!isElementVisible(el) || blanks.includes(el) || el.closest("#gemini-live-host, #steptest-ai-banner, header, nav")) return false;
+        const lower = safeText(el).toLowerCase().trim();
+        if (/^(reset|submit|next|start)\b/i.test(lower)) return false;
+
         const rect = el.getBoundingClientRect();
-        const txt = safeText(el);
-        return rect.width >= 20 && rect.height >= 14 && (txt.length === 0 || /^\[?\s*blank\s*\d*\s*\]?$/i.test(txt) || /^_{1,}$/.test(txt));
+        if (rect.width < 18 || rect.height < 14) return false;
+
+        if (el.matches("[class*='blank' i], [class*='slot' i], [class*='drop' i], [class*='gap' i], [class*='target' i], [class*='dashed' i], [class*='dotted' i], [data-blank], [data-slot]")) {
+          return true;
+        }
+
+        const txt = safeText(el).trim();
+        return (txt.length === 0 || /^\[?\s*blank\s*\d*\s*\]?$/i.test(txt) || /^_{1,}$/.test(txt));
       });
       inlineBoxes.forEach(box => {
         if (!blanks.includes(box)) blanks.push(box);
       });
     }
 
+    // Filter out parent wrappers if inner child is already recorded as a blank
+    const leafBlanks = blanks.filter(b => !blanks.some(other => other !== b && b.contains(other)));
+
     // Sort by physical reading order (top-to-bottom, left-to-right)
-    blanks.sort((a, b) => {
+    leafBlanks.sort((a, b) => {
       const rA = a.getBoundingClientRect();
       const rB = b.getBoundingClientRect();
       if (Math.abs(rA.top - rB.top) > 12) {
@@ -951,10 +1007,10 @@
       return rA.left - rB.left;
     });
 
-    if (blanks.length === 0 && scope !== document.body) {
+    if (leafBlanks.length === 0 && scope !== document.body) {
       return findClozeBlanks(document.body);
     }
-    return blanks;
+    return leafBlanks;
   }
 
   // Helper to find the destination container (e.g. "YOUR SENTENCE" / "YOUR STORY" / "YOUR PASSAGE" / "YOUR ANSWER" box)
@@ -1708,10 +1764,28 @@
       }
     }
 
+    // Fingerprint of context or options to differentiate consecutive questions with identical prompts
+    const optionsSnippet = (data?.options || data?.wordChoices || data?.sentenceTokens || [])
+      .map(o => (o.text || "").slice(0, 8))
+      .join("_")
+      .replace(/[^a-zA-Z0-9_]/g, "")
+      .toLowerCase()
+      .slice(0, 30);
+
+    const contextSnippet = (data?.context || "")
+      .slice(0, 30)
+      .replace(/[^a-zA-Z0-9]/g, "")
+      .toLowerCase();
+
+    const fingerprint = optionsSnippet || contextSnippet;
+
     if (prefix && titlePart) {
-      return `${prefix}::${titlePart}`;
+      return fingerprint ? `${prefix}::${titlePart}::${fingerprint}` : `${prefix}::${titlePart}`;
     }
-    return prefix || titlePart || "active_question";
+    if (titlePart && fingerprint) {
+      return `${titlePart}::${fingerprint}`;
+    }
+    return prefix || titlePart || fingerprint || "active_question";
   }
 
   // Token-Saver: Check if question is already answered on screen
@@ -2172,14 +2246,21 @@
       return txt.startsWith("reset");
     });
 
+    const initialBlanks = findClozeBlanks(document.body);
     const hasPlacedBlanks = (
+      initialBlanks.some(b => {
+        const txt = safeText(b).trim();
+        return txt.length > 0 && !/^\[?\s*blank\s*\d*\s*\]?$/i.test(txt) && !/^_{1,}$/.test(txt);
+      }) ||
       document.querySelectorAll("[class*='blank' i] [class*='chip' i], [class*='slot' i] [class*='chip' i]").length > 0 ||
-      document.querySelectorAll("[class*='chip' i].selected").length > 0
+      document.querySelectorAll("[class*='chip' i].selected, [class*='token' i].selected").length > 0
     );
 
     if (resetBtn && hasPlacedBlanks) {
+      console.log("[Step Solver] Cloze board contains placed blanks. Clicking Reset for clean placement...");
+      try { resetBtn.click(); } catch (_) {}
       simulateClick(resetBtn);
-      await delay(180);
+      await delay(350);
     }
 
     // Extract ordered words from Gemini response
@@ -2216,27 +2297,50 @@
 
       // 1. Fresh query for live blank slots in reading order
       const liveBlanks = findClozeBlanks(document.body);
-      const targetBlank = liveBlanks[i] || null;
+      const targetBlank = liveBlanks[i] || liveBlanks.find(b => {
+        const txt = safeText(b).trim();
+        return txt.length === 0 || /^\[?\s*blank\s*\d*\s*\]?$/i.test(txt) || /^_{1,}$/.test(txt);
+      }) || null;
 
-      // Click the blank slot first to ensure StepTest focuses / selects this slot
+      // Click and focus the blank slot first so StepTest activates the slot for placement
       if (targetBlank) {
         try {
           if (typeof targetBlank.focus === "function") targetBlank.focus();
-          simulateClick(targetBlank);
-          targetBlank.dispatchEvent(new Event("focus", { bubbles: true }));
-          await delay(100);
+          targetBlank.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          targetBlank.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+          targetBlank.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+          targetBlank.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+          if (typeof targetBlank.click === "function") targetBlank.click();
+          await delay(120);
         } catch (_) {}
       }
 
       // 2. Fresh query for live unplaced chips
       const liveChips = findClozeChips(document.body);
-      let matchingChip = liveChips.find(c => {
-        const cleanChip = cleanString(c.text);
-        return cleanChip === cleanTarget;
-      }) || liveChips.find(c => {
-        const cleanChip = cleanString(c.text);
-        return cleanChip.includes(cleanTarget) || cleanTarget.includes(cleanChip);
-      });
+      let matchingChip = liveChips.find(c => cleanString(c.text) === cleanTarget)
+        || liveChips.find(c => {
+          const ct = cleanString(c.text);
+          return ct.startsWith(cleanTarget) || cleanTarget.startsWith(ct);
+        })
+        || liveChips.find(c => {
+          const ct = cleanString(c.text);
+          return ct.includes(cleanTarget) || cleanTarget.includes(ct);
+        });
+
+      // Word Token Overlap Match (for dialogue sentences)
+      if (!matchingChip && liveChips.length > 0) {
+        const targetWords = cleanTarget.split(" ").filter(w => w.length > 2);
+        let bestScore = -1;
+        for (const c of liveChips) {
+          const chipWords = cleanString(c.text).split(" ").filter(w => w.length > 2);
+          const common = chipWords.filter(w => targetWords.includes(w));
+          const score = common.length / Math.max(chipWords.length, targetWords.length);
+          if (score > bestScore && score >= 0.4) {
+            bestScore = score;
+            matchingChip = c;
+          }
+        }
+      }
 
       // Fallback search across visible candidate elements
       if (!matchingChip) {
@@ -2252,7 +2356,7 @@
       }
 
       if (matchingChip && matchingChip.element) {
-        simulateClick(matchingChip.element);
+        clickChipToken(matchingChip.element);
         placedCount++;
         placedLabels.push(`${i + 1}: ${matchingChip.text}`);
 
@@ -2261,7 +2365,7 @@
           setElementValue(targetBlank, matchingChip.text);
         }
 
-        await delay(Math.max(250, state.typingDelayMs || 250));
+        await delay(Math.max(350, state.typingDelayMs || 250));
       }
     }
 
@@ -2869,6 +2973,9 @@
         simulateClick(nextBtn);
         await delay(1500);
         isAutoNextClicking = false;
+        state.isProcessing = false;
+        state.lastSolvedQuestionId = "";
+        state.inFlightQuestionId = null;
       } else {
         console.warn("[Step Solver] Auto-Next: Next button not found or disabled after 2s.");
       }
@@ -3468,6 +3575,13 @@
         return;
       }
 
+      // CRITICAL: Ensure we are inside an active test / exercise page before attempting to solve
+      if (!isQuestionOrTestActive()) {
+        console.log("[Step Solver] No submit/reset/test button found. Page is not an active test/question.");
+        updateStatus("Ready", "idle", "READY");
+        return;
+      }
+
       const container = findActiveQuestionContainer();
       if (!container && isAnswerOrFeedbackPage()) {
         return;
@@ -3765,7 +3879,15 @@
     if (autoWatchInterval) clearInterval(autoWatchInterval);
 
     state.observer = new MutationObserver(() => {
-      if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
+      if (!state.isEnabled || !state.isAutoWatch) return;
+      if (state.isProcessing) {
+        if (Date.now() - state.lastSolveTimestamp > 8000) {
+          console.warn("[Step Solver] Watchdog: Recovering stuck processing state in observer...");
+          state.isProcessing = false;
+        } else {
+          return;
+        }
+      }
       clearTimeout(autoWatchDebounce);
       autoWatchDebounce = setTimeout(() => {
         if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
@@ -3776,6 +3898,7 @@
           }
           return;
         }
+        if (!isQuestionOrTestActive()) return;
         handleAutoPlayVideo();
         const container = findActiveQuestionContainer();
         if (!container) return;
@@ -3784,7 +3907,7 @@
         if (currentId && !state.solvedQuestionIds.has(currentId) && currentId !== state.lastSolvedQuestionId) {
           triggerSolve(true);
         }
-      }, 1200);
+      }, 600);
     });
 
     state.observer.observe(document.body, {
@@ -3792,9 +3915,17 @@
       subtree: true
     });
 
-    // Also check every 2 seconds to detect if user advanced to next question
+    // Also check every 1.5 seconds to detect if user advanced to next question
     autoWatchInterval = setInterval(() => {
-      if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
+      if (!state.isEnabled || !state.isAutoWatch) return;
+      if (state.isProcessing) {
+        if (Date.now() - state.lastSolveTimestamp > 8000) {
+          console.warn("[Step Solver] Watchdog: Recovering stuck processing state in interval...");
+          state.isProcessing = false;
+        } else {
+          return;
+        }
+      }
       if (isAnswerOrFeedbackPage()) {
         hideAnswerBanner();
         if (state.autoSubmitEnabled) {
@@ -3802,6 +3933,7 @@
         }
         return;
       }
+      if (!isQuestionOrTestActive()) return;
       const container = findActiveQuestionContainer();
       if (!container) return;
       const data = extractQuestionData(container);
@@ -3809,7 +3941,7 @@
       if (currentId && !state.solvedQuestionIds.has(currentId) && currentId !== state.lastSolvedQuestionId) {
         triggerSolve(true);
       }
-    }, 2000);
+    }, 1500);
   }
 
   function stopAutoWatcher() {
