@@ -701,28 +701,6 @@ Return ONLY a valid JSON object without markdown fences:
         });
     }
 
-    // Single-dispatch click for rearrange chips/tokens to prevent framework double-activation
-    function clickChipToken(element) {
-        if (!element) return;
-        const target = element.closest("button, [role='button'], [class*='chip' i], [class*='token' i], [class*='pill' i], [class*='item' i]") || element;
-        try { target.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {}
-
-        try {
-            if (typeof PointerEvent !== "undefined") {
-                target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, view: window, pointerId: 1, pointerType: "mouse", isPrimary: true }));
-            }
-        } catch (_) {}
-        try { target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window })); } catch (_) {}
-        try {
-            if (typeof PointerEvent !== "undefined") {
-                target.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, view: window, pointerId: 1, pointerType: "mouse", isPrimary: true }));
-            }
-        } catch (_) {}
-        try { target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window })); } catch (_) {}
-        try { target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); } catch (_) {}
-        try { target.click(); } catch (_) {}
-    }
-
     function isElementVisible(el) {
         if (!el || !(el instanceof Element)) return false;
         if (el.closest("[style*='display: none'], [style*='display:none'], [hidden], .hidden, .hide, .d-none, .ng-hide, [aria-hidden='true']")) {
@@ -1022,47 +1000,6 @@ Return ONLY a valid JSON object without markdown fences:
         return blanks;
     }
 
-    // Helper to find the destination container (e.g. "YOUR SENTENCE" / "YOUR STORY" / "YOUR PASSAGE" / "YOUR ANSWER" box)
-    function findDestinationContainer() {
-        const allEls = Array.from(document.querySelectorAll("*")).filter(isElementVisible);
-        for (const el of allEls) {
-            if (isNavOrSystem(el)) continue;
-            const t = safeText(el).trim().toLowerCase();
-            if (
-                t === "your sentence" ||
-                t === "your answer" ||
-                t === "your story" ||
-                t === "your passage" ||
-                t === "your response" ||
-                t.startsWith("your sentence")
-            ) {
-                const box = el.closest("fieldset, [class*='sentence' i], [class*='answer' i], [class*='box' i], [class*='drop' i], [class*='target' i], [class*='board' i], [class*='container' i], div");
-                return box || el.parentElement;
-            }
-        }
-        return null;
-    }
-
-    // Helper to find the Word Bank container
-    function findWordBankContainer() {
-        const allEls = Array.from(document.querySelectorAll("*")).filter(isElementVisible);
-        for (const el of allEls) {
-            if (isNavOrSystem(el)) continue;
-            const t = safeText(el).trim().toLowerCase();
-            if (
-                t === "word bank" ||
-                t === "phrase bank" ||
-                t === "words to arrange" ||
-                t === "word list" ||
-                t === "words"
-            ) {
-                const box = el.closest("fieldset, [class*='bank' i], [class*='words' i], [class*='pool' i], [class*='source' i], [class*='box' i], [class*='container' i], div");
-                return { header: el, container: box || el.parentElement };
-            }
-        }
-        return null;
-    }
-
     // Detect if current screen is a Sentence Rearrangement question
     function checkIsRearrangeQuestion() {
         const bodyText = (document.body ? safeText(document.body) : "").toLowerCase();
@@ -1107,12 +1044,8 @@ Return ONLY a valid JSON object without markdown fences:
             bodyText.includes("arrange sentences") ||
             bodyText.includes("arrange the words") ||
             bodyText.includes("arrange the phrases") ||
-            bodyText.includes("arrange the following") ||
-            bodyText.includes("in the correct sequence") ||
             bodyText.includes("form a logical sentence") ||
-            bodyText.includes("form a sentence") ||
-            (bodyText.includes("word bank") && (bodyText.includes("your sentence") || bodyText.includes("your story") || bodyText.includes("your passage") || bodyText.includes("your answer"))) ||
-            (bodyText.includes("rearrange") && bodyText.includes("read it aloud"))
+            bodyText.includes("form a sentence")
         );
 
         if (isFillBlankOrChoose && !hasRearrangeKeywords) {
@@ -1136,58 +1069,22 @@ Return ONLY a valid JSON object without markdown fences:
     function findRearrangeTokens() {
         const tokens = [];
         const seen = new Set();
-        const destContainer = findDestinationContainer();
 
         function isValidChip(el) {
-            if (!el || !isElementVisible(el) || el.closest("header, nav, video, iframe, #steptest-ai-banner, .ytp-chrome-bottom")) return false;
-
-            // CRITICAL: Chips already inside or belonging to the destination box (YOUR SENTENCE / YOUR STORY) are NOT available tokens
-            if (destContainer && (el === destContainer || destContainer.contains(el))) return false;
-
-            const txt = safeText(el).trim();
-            if (!txt || txt.length < 1 || txt.length > 500) return false;
+            if (!el || !isElementVisible(el) || el.closest("header, nav, video, iframe, #steptest-ai-banner")) return false;
+            const txt = safeText(el);
+            if (!txt || txt.length < 1 || txt.length > 450) return false;
             const lower = txt.toLowerCase();
-
-            // System / UI navigation words
-            if (/^(reset|submit|next|replay|play|save|continue|grade|abc|record|speak|mic|listen|share|subscribe)\b/i.test(lower)) return false;
-
-            // Question instructions and labels
+            if (/^(reset|submit|next|replay|play|save|continue|grade|abc|record|speak|mic|listen)\b/i.test(lower)) return false;
             if (lower.startsWith("rearrange the words or phrases")) return false;
             if (lower.startsWith("arrange the following sentences")) return false;
-            if (lower.startsWith("rearrange the following sentences")) return false;
-            if (lower.startsWith("arrange the sentences")) return false;
-            if (lower.startsWith("rearrange the sentence")) return false;
-            if (lower.startsWith("rearrange words")) return false;
-            if (lower.startsWith("rearrange phrases")) return false;
             if (lower.startsWith("form a logical sentence")) return false;
-            if (lower.startsWith("form sentences")) return false;
-            if (lower.startsWith("form a sentence")) return false;
-
-            // Filter contextual prompts containing rearrange instructions
-            if (lower.includes("arrange the following sentences") || lower.includes("rearrange the following sentences")) return false;
-            if (lower.includes("in the correct sequence to see") || lower.includes("in the correct sequence")) return false;
-            if (lower.includes("rearrange the words or phrases") || lower.includes("form a logical sentence")) return false;
-
-            // Video & helper labels
-            if (lower.includes("if the video is not loading")) return false;
-            if (lower === "click here" || lower.startsWith("click here")) return false;
-            if (lower.includes("watch on youtube") || lower.includes("step - the hindu group")) return false;
-            if (lower.includes("record your answer using your microphone")) return false;
-            if (lower.includes("form sentences that express opinion")) return false;
+            if (lower.startsWith("if the video is not loading")) return false;
             if (/^\d{1,2}:\d{2}/.test(lower)) return false;
-
-            // StepTest UI Headers & Subtext
-            if (lower === "your sentence" || lower === "your answer" || lower === "your story" || lower === "your passage" || lower === "your response") return false;
-            if (lower === "word bank" || lower === "phrase bank" || lower === "word list" || lower === "words" || lower === "words to arrange") return false;
-            if (lower.includes("tap chips below") || lower.includes("tap words below") || lower.includes("build your answer")) return false;
-            if (lower.includes("tap on the words") || lower.includes("tap to build")) return false;
-
-            // Punctuation, blanks & slots
             if (el.matches("button[type='submit'], input[type='submit']")) return false;
             if (txt.includes("“") || txt.includes("”")) return false;
             if (/^[—–\-_.\s]+$/.test(txt)) return false;
             if (/^\d+\s+of\s+\d+(\s+questions?)?$/i.test(txt)) return false;
-
             return true;
         }
 
@@ -1196,56 +1093,14 @@ Return ONLY a valid JSON object without markdown fences:
             return !Array.from(el.querySelectorAll("*")).some(ch => isValidChip(ch));
         }
 
-        // Strategy 0: Word Bank Section (Highest priority match for StepTest Word Bank)
-        const wordBankInfo = findWordBankContainer();
-        if (wordBankInfo) {
-            const allElements = Array.from(document.querySelectorAll("*")).filter(isElementVisible);
-            const bankHeaderIdx = allElements.indexOf(wordBankInfo.header);
-
-            let endIdx = -1;
-            const resetBtn = allElements.find((el, idx) => {
-                if (idx <= bankHeaderIdx || isNavOrSystem(el)) return false;
-                const txt = safeText(el).toLowerCase().trim();
-                return txt === "reset" || txt.startsWith("reset");
-            });
-
-            if (resetBtn) {
-                endIdx = allElements.indexOf(resetBtn);
-            } else {
-                const boundaryBtn = allElements.findIndex((el, idx) => {
-                    if (idx <= bankHeaderIdx) return false;
-                    const txt = safeText(el).toLowerCase().trim();
-                    return (txt === "submit" || txt === "next") && el.matches("button, input, [role='button']");
-                });
-                endIdx = boundaryBtn !== -1 ? boundaryBtn : allElements.length;
-            }
-
-            if (bankHeaderIdx !== -1) {
-                for (let i = bankHeaderIdx + 1; i < endIdx; i++) {
-                    const el = allElements[i];
-                    if (isLeafChip(el) && !seen.has(el)) {
-                        const t = safeText(el).trim();
-                        seen.add(el);
-                        tokens.push({ element: el, index: tokens.length, text: t });
-                    }
-                }
-                if (tokens.length >= 3) return tokens;
-            }
-        }
-
-        // Strategy 0b: StepTest Rearrange Anchor to Reset Button (Fallback)
+        // Strategy 0: StepTest Rearrange Anchor to Reset Button
         const allLabels = Array.from(document.querySelectorAll("*")).filter(el => isElementVisible(el) && !isNavOrSystem(el));
         const matchingAnchors = allLabels.filter(el => {
             const t = safeText(el).toLowerCase();
             return (
                 t.includes("rearrange the words or phrases") ||
                 t.includes("arrange the following sentences") ||
-                t.includes("arrange the sentences") ||
-                t.includes("arrange sentences") ||
-                t.includes("arrange the words") ||
                 t.includes("form a logical sentence") ||
-                t.includes("form sentences") ||
-                t.includes("form a sentence") ||
                 t.includes("rearrange the sentence")
             );
         });
@@ -1260,15 +1115,15 @@ Return ONLY a valid JSON object without markdown fences:
             let endIdx = -1;
             const resetBtn = allElements.find((el, idx) => {
                 if (idx <= anchorIdx || isNavOrSystem(el)) return false;
-                const txt = safeText(el).toLowerCase().trim();
-                return txt === "reset" || txt.startsWith("reset");
+                const txt = safeText(el).toLowerCase();
+                return txt.startsWith("reset");
             });
             if (resetBtn) {
                 endIdx = allElements.indexOf(resetBtn);
             } else {
                 const boundaryBtn = allElements.findIndex((el, idx) => {
                     if (idx <= anchorIdx) return false;
-                    const txt = safeText(el).toLowerCase().trim();
+                    const txt = safeText(el).toLowerCase();
                     return (txt === "submit" || txt === "next") && el.matches("button, input, [role='button']");
                 });
                 endIdx = boundaryBtn !== -1 ? boundaryBtn : allElements.length;
@@ -1278,7 +1133,7 @@ Return ONLY a valid JSON object without markdown fences:
                 for (let i = anchorIdx + 1; i < endIdx; i++) {
                     const el = allElements[i];
                     if (isLeafChip(el) && !seen.has(el)) {
-                        const t = safeText(el).trim();
+                        const t = safeText(el);
                         seen.add(el);
                         tokens.push({ element: el, index: tokens.length, text: t });
                     }
@@ -1289,40 +1144,30 @@ Return ONLY a valid JSON object without markdown fences:
 
         const candidateParents = Array.from(document.querySelectorAll("div, ul, section")).filter(p => {
             if (p.closest("header, nav, video, iframe, #steptest-ai-banner")) return false;
-            if (destContainer && (p === destContainer || destContainer.contains(p))) return false;
-            const leafChips = Array.from(p.querySelectorAll("*")).filter(isLeafChip);
-            return leafChips.length >= 3 && leafChips.length <= 15;
+            const validChildren = Array.from(p.children).filter(isValidChip);
+            return validChildren.length >= 3 && validChildren.length <= 15;
         });
 
         if (candidateParents.length > 0) {
-            candidateParents.sort((a, b) => a.querySelectorAll("*").length - b.querySelectorAll("*").length);
             const bestParent = candidateParents[0];
-            Array.from(bestParent.querySelectorAll("*")).filter(isLeafChip).forEach((el, idx) => {
+            Array.from(bestParent.children).filter(isValidChip).forEach((el, idx) => {
                 if (!seen.has(el)) {
                     seen.add(el);
-                    tokens.push({ element: el, index: tokens.length, text: safeText(el).trim() });
+                    tokens.push({ element: el, index: idx, text: safeText(el) });
                 }
             });
             if (tokens.length >= 3) return tokens;
         }
 
-        const chipSelectors = [
-            ".word-chip", ".sentence-token", ".draggable-word", ".sortable-item",
-            ".word-tile", "[data-word]", "[class*='phrase' i]", "[class*='chip' i]",
-            "[class*='token' i]", "[class*='badge' i]", ".btn-phrase", ".pill"
-        ];
-        for (const sel of chipSelectors) {
-            const found = Array.from(document.querySelectorAll(sel)).filter(isLeafChip);
-            if (found.length >= 3 && found.length <= 15) {
-                found.forEach((el) => {
-                    const t = safeText(el).trim();
-                    if (!seen.has(el)) {
-                        seen.add(el);
-                        tokens.push({ element: el, index: tokens.length, text: t });
-                    }
-                });
-                if (tokens.length >= 3) return tokens;
-            }
+        const allClickables = Array.from(document.querySelectorAll("button, div[role='button'], span[role='button'], div[tabindex]"))
+            .filter(isValidChip);
+        if (allClickables.length >= 3 && allClickables.length <= 15) {
+            allClickables.forEach((el, idx) => {
+                if (!seen.has(el)) {
+                    seen.add(el);
+                    tokens.push({ element: el, index: idx, text: safeText(el) });
+                }
+            });
         }
 
         return tokens;
@@ -1721,28 +1566,12 @@ Return ONLY a valid JSON object without markdown fences:
                         // Clean Board Check: If any chips are already slotted, reset first!
                         const resetBtn = Array.from(document.querySelectorAll("button, div[role='button'], a, input[type='button']")).find(b => {
                             if (isNavOrSystem(b) || !isElementVisible(b)) return false;
-                            const txt = safeText(b).toLowerCase().trim();
-                            return txt === "reset" || txt.startsWith("reset");
+                            const txt = safeText(b).toLowerCase();
+                            return txt.startsWith("reset");
                         });
-
-                        const destBox = findDestinationContainer();
-                        const destHasPlacedChips = destBox && Array.from(destBox.querySelectorAll("*")).some(el => {
-                            if (!isElementVisible(el)) return false;
-                            const txt = safeText(el).trim().toLowerCase();
-                            if (!txt || txt === "your sentence" || txt === "your answer" || txt === "your story" || txt === "your passage" || txt === "your response") return false;
-                            if (txt.includes("tap chips below") || txt.includes("tap words below") || txt.includes("build your answer")) return false;
-                            return true;
-                        });
-
-                        const hasPlacedChips = destHasPlacedChips || (
-                            document.querySelectorAll("[class*='slot' i] [class*='chip' i], [class*='slot' i] span, .word-slot:not(:empty)").length > 0 ||
-                            document.querySelectorAll("[class*='chip' i].selected, [class*='token' i].selected, [class*='phrase' i].selected").length > 0 ||
-                            document.querySelectorAll(".selected-chip, .placed-token, [data-placed='true']").length > 0
-                        );
-
+                        const hasPlacedChips = document.querySelectorAll("[class*='slot' i] [class*='chip' i], [class*='slot' i] span, .word-slot:not(:empty)").length > 0;
                         if (resetBtn && hasPlacedChips) {
                             console.log("[StepTest] Resetting rearrange slots to ensure clean insertion...");
-                            try { resetBtn.click(); } catch (_) {}
                             simulateClick(resetBtn);
                             await wait(350);
                         }
@@ -1763,9 +1592,8 @@ Return ONLY a valid JSON object without markdown fences:
                                     .toLowerCase()
                                     // Strip leading numbering e.g. "1. ", "A) ", "(1) ", "Sentence 1: "
                                     .replace(/^(?:(?:\d+|[a-z])[\.\)\-:]|\((?:\d+|[a-z])\)|(?:sentence|phrase|clause)\s*\d+[:\-]?)\s*/i, "")
-                                    // Strip quotes cleanly and replace remaining punctuation with spaces
-                                    .replace(/[“’”'"]/g, "")
-                                    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, " ")
+                                    // Strip punctuation and quotes
+                                    .replace(/[“’”".,\/#!$%\^&\*;:{}=\-_`~()?]/g, " ")
                                     .replace(/\s+/g, " ")
                                     .trim();
                             }
@@ -1961,19 +1789,8 @@ Return ONLY a valid JSON object without markdown fences:
 
                             // Sequentially click the chips in order
                             for (const chip of orderedChips) {
-                                let targetEl = chip.element;
-                                if (!targetEl || !targetEl.isConnected) {
-                                    const freshTokens = findRearrangeTokens();
-                                    const match = freshTokens.find(ft => normalizeTokenText(ft.text) === normalizeTokenText(chip.text));
-                                    if (match && match.element) {
-                                        targetEl = match.element;
-                                    }
-                                }
-
-                                if (targetEl && isElementVisible(targetEl)) {
-                                    clickChipToken(targetEl);
-                                    await wait(350);
-                                }
+                                simulateClick(chip.element);
+                                await wait(300);
                             }
 
                             const resultSentence = solution.reconstructed_sentence || orderedChips.map(c => c.text).join(" ");

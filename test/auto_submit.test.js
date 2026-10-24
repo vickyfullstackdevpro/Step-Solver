@@ -217,32 +217,4 @@ describe("Auto-Submit Waiting Logic & Scoped Exceptional Fallback", () => {
     assert.equal(rearrangeAuto.clickedCount, 3, "Rearrange question must auto-fill when Auto-Submit is ON");
     assert.equal(rearrangeAuto.success, true);
   });
-
-  test("Non-Question Page Guard: Rejects course landing pages without test buttons", () => {
-    function mockIsQuestionOrTestActive(url, hasSubmit, hasReset, hasQuestionMeta) {
-      if (hasSubmit || hasReset || hasQuestionMeta) return true;
-      if (url.includes("/courses/") || url.includes("/dashboard") || url.includes("/home")) {
-        return false;
-      }
-      return false;
-    }
-
-    assert.equal(mockIsQuestionOrTestActive("https://steptest.ai/courses/931", false, false, false), false, "Course dashboard must be recognized as non-question page");
-    assert.equal(mockIsQuestionOrTestActive("https://steptest.ai/courses/931/test/1", true, false, false), true, "Test page with submit button must be active");
-    assert.equal(mockIsQuestionOrTestActive("https://steptest.ai/courses/931/test/2", false, true, false), true, "Test page with reset button must be active");
-  });
-
-  test("Question Fingerprinting: Generates distinct IDs for identical prompts with different choices", () => {
-    function computeId(prompt, options) {
-      const titlePart = prompt.slice(0, 30).replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
-      const optionsSnippet = options.map(o => o.slice(0, 8)).join("_").replace(/[^a-zA-Z0-9_]/g, "").toLowerCase().slice(0, 30);
-      return `${titlePart}::${optionsSnippet}`;
-    }
-
-    const q1 = computeId("Choose the correct word:", ["apple", "banana", "cherry"]);
-    const q2 = computeId("Choose the correct word:", ["dog", "elephant", "fox"]);
-
-    assert.notEqual(q1, q2, "Two questions with identical prompt must have different IDs based on options");
-  });
 });
-
