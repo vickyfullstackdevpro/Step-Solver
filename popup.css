@@ -1018,42 +1018,6 @@ body {
   flex-shrink: 0;
 }
 
-/* Model Auto Indicator */
-.model-auto-indicator {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.model-indicator-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.indicator-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #f8fafc;
-}
-
-.model-pill {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 9999px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(56, 189, 248, 0.25) 100%);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.model-indicator-sub {
-  font-size: 10.5px;
-  color: #94a3b8;
-  line-height: 1.35;
-}
-
 /* ============================================================ */
 /* User Account Bar (Executive Dark Glassmorphic Card) */
 /* ============================================================ */

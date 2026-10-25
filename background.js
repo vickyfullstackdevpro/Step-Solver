@@ -386,7 +386,7 @@ CRITICAL CLASSIFICATION & SOLVING RULES:
   * Return the complete ordered list of words in "ordered_fill_blanks" (e.g. ["arrivals", "departures", "security", "board", "gate"]). If there are 5 blanks, "ordered_fill_blanks" MUST contain exactly 5 words!
   * Return the complete reconstructed passage with all blanks filled in "reconstructed_passage".
   * CRITICAL: DO NOT classify multiple-blank questions as single-option MCQ! All blanks must be solved! NEVER return a single generic word like "Option".
-- If Question Category is 'rearrange_sentence' OR if the question asks to 'rearrange the phrases', 'rearrange the words', 'arrange the following sentences', or 'arrange sentences in the correct sequence' to form a logical story/sentence where clickable chips/tokens are provided on screen: THIS IS A REARRANGE SENTENCE QUESTION!
+- If Question Category is 'rearrange_sentence' OR if the question asks to 'rearrange the phrases', 'rearrange the words', 'arrange the following statements', 'arrange the following sentences', 'arrange statements in increasing order of politeness', or 'arrange sentences in the correct sequence' to form a logical story/sentence/order where clickable chips/tokens are provided on screen: THIS IS A REARRANGE SENTENCE QUESTION!
   * CRITICAL FOR REARRANGEMENT QUESTIONS:
     - The tokens on screen are in SCRAMBLED or ARBITRARY order.
     - You MUST analyze the narrative/chronological timeline or grammatical syntax to determine the true, correct sequence.

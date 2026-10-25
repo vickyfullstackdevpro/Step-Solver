@@ -36,6 +36,182 @@
   const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
   // -------------------------------------------------------------
+  // Declarative DOM Selector Adapter Registry (SPA & Tailwind Resilient)
+  // -------------------------------------------------------------
+  const DOM_ADAPTER = {
+    containers: {
+      questionRoot: [
+        ".lesson-stage",
+        "[data-testid='question-card']",
+        "[role='region'][aria-label*='question' i]",
+        "div.q-stim",
+        ".q-stim",
+        "h2.q-prompt",
+        ".q-prompt",
+        ".player-body",
+        "main",
+        "#content",
+        ".test-container",
+        ".question-container",
+        ".question.active",
+        ".active-question",
+        ".current-question",
+        ".question-card",
+        ".question",
+        ".quiz-card",
+        ".exercise"
+      ],
+      answerWorkZone: [
+        "[data-testid='answer-zone']",
+        "div.flex.flex-wrap[class*='min-h-']",
+        "[aria-label*='your sentence' i]"
+      ],
+      wordBank: [
+        "[data-testid*='word-bank']",
+        ".space-y-1 .flex-wrap",
+        "div.flex.flex-wrap.gap-2"
+      ]
+    },
+    prompts: [
+      "h2.q-prompt",
+      ".q-prompt",
+      "[data-testid='question-prompt']",
+      "[data-testid='q-prompt']",
+      "[role='heading'][aria-level='2']",
+      ".question-title",
+      ".question-text",
+      ".prompt",
+      ".instruction",
+      "h1, h2, h3, h4",
+      "legend",
+      "p.title",
+      "label.question-label"
+    ],
+    interactive: {
+      mcqOptions: [
+        "button[data-testid*='option']",
+        "[role='radio']",
+        "[role='checkbox']",
+        "[role='option']",
+        "[class*='option' i]:not([role='region'])",
+        "[class*='choice' i]",
+        "[class*='answer' i]",
+        "[class*='ans' i]",
+        "[class*='radio' i]",
+        ".mat-radio-button",
+        "mat-radio-button",
+        ".custom-control",
+        "[aria-checked]",
+        "[data-option]",
+        "[data-choice]",
+        "[data-value]",
+        ".selectable",
+        "[class*='selectable' i]"
+      ],
+      clozeBlanks: [
+        "button[data-testid^='cloze-blank-']",
+        "[data-testid*='cloze-blank']",
+        ".q-stim button[role='button']",
+        ".q-stim button",
+        "[class*='blank' i]",
+        "[class*='slot' i]",
+        "[class*='drop' i]",
+        "[class*='target' i]",
+        "[class*='droppable' i]",
+        "[class*='placeholder' i]",
+        "[data-blank]",
+        "[data-slot]",
+        "[data-index]",
+        "input:not([type='button']):not([type='submit']):not([type='radio']):not([type='checkbox'])"
+      ],
+      rearrangeTokens: [
+        "button[data-testid*='token']",
+        "button.rounded-pill",
+        "button[class*='rounded-pill']",
+        ".space-y-1 .flex-wrap button",
+        ".flex.flex-wrap.gap-2 button",
+        "[data-testid*='word-bank'] button",
+        ".word-chip",
+        ".sentence-token",
+        ".draggable-word",
+        ".sortable-item",
+        ".word-tile",
+        "[data-word]",
+        "[class*='phrase' i]",
+        "[class*='chip' i]",
+        "[class*='token' i]",
+        "[class*='badge' i]",
+        ".btn-phrase",
+        ".pill",
+        "[class*='sentence' i]",
+        "[class*='block' i]",
+        "[class*='tile' i]"
+      ]
+    },
+    writing: [
+      "textarea:not(.gemini-input)",
+      "[contenteditable='true']",
+      "[contenteditable='']",
+      "[contenteditable]",
+      "[role='textbox']",
+      ".ql-editor",
+      ".fr-element",
+      ".monaco-editor",
+      ".public-DraftEditor-content",
+      "div.editable"
+    ],
+    actions: {
+      start: ["button[data-testid='btn-start']", "[data-testid*='start']", ".btn-start", ".start-btn"],
+      submit: ["button[data-testid='btn-submit']", "[data-testid*='submit']", ".btn-submit", ".submit-btn"],
+      next: ["button[data-testid='btn-next']", "[data-testid*='next']", ".btn-next", ".next-btn"],
+      reset: ["button[data-testid='btn-reset']", "[data-testid*='reset']", ".btn-reset", ".reset-btn"]
+    },
+    exclusions: [
+      "#gemini-live-host",
+      "#gemini-answer-banner",
+      "#gemini-teleprompter",
+      "#steptest-ai-banner",
+      "header",
+      "nav",
+      "footer",
+      "[class*='top-bar' i]"
+    ]
+  };
+
+  function querySmart(selectorList, scope = document) {
+    const list = Array.isArray(selectorList) ? selectorList : [selectorList];
+    const excl = DOM_ADAPTER.exclusions.join(",");
+    for (const sel of list) {
+      try {
+        const el = scope.querySelector(sel);
+        if (el && isElementVisible(el) && !el.closest(excl)) {
+          return el;
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  function querySmartAll(selectorList, scope = document) {
+    const list = Array.isArray(selectorList) ? selectorList : [selectorList];
+    const excl = DOM_ADAPTER.exclusions.join(",");
+    const results = [];
+    const seen = new Set();
+    for (const sel of list) {
+      try {
+        const elements = Array.from(scope.querySelectorAll(sel));
+        for (const el of elements) {
+          if (!seen.has(el) && isElementVisible(el) && !el.closest(excl)) {
+            seen.add(el);
+            results.push(el);
+          }
+        }
+      } catch (_) {}
+    }
+    return results;
+  }
+
+  // -------------------------------------------------------------
   // 1. UI Initialization: Floating Widget & Teleprompter
   // -------------------------------------------------------------
   async function initHUD() {
@@ -87,6 +263,7 @@
     ensureVideoWatcher();
     initUserInteractionUnmute();
     handleAutoPlayVideo();
+    setupSpaRouteListener();
 
     const host = document.createElement("div");
     host.id = "gemini-live-host";
@@ -186,11 +363,6 @@
           <span id="gemini-speech-meta">~0 words</span>
         </div>
       </div>
-
-      <!-- Floating Toast -->
-      <div id="gemini-toast" class="gemini-toast">
-        <span id="gemini-toast-msg">Notification</span>
-      </div>
     `;
 
     document.body.appendChild(host);
@@ -239,16 +411,14 @@
     toggleAuto.addEventListener("change", (e) => {
       if (!state.isEnabled) {
         e.target.checked = false;
-        showToast("Enable extension first");
         return;
       }
       state.isAutoWatch = e.target.checked;
-      showToast(state.isAutoWatch ? "Auto-Solve Loop Activated" : "Auto-Solve Loop Paused");
       if (state.isAutoWatch) {
         startAutoWatcher();
-        triggerSolve(true);
       } else {
         stopAutoWatcher();
+        updateStatus("Idle", "idle", "IDLE");
       }
     });
 
@@ -263,9 +433,7 @@
 
     btnCopySpeech.addEventListener("click", () => {
       const text = document.getElementById("gemini-speech-content").innerText;
-      navigator.clipboard.writeText(text).then(() => {
-        showToast("Speech text copied to clipboard!");
-      });
+      navigator.clipboard.writeText(text).catch(() => {});
     });
   }
 
@@ -274,7 +442,6 @@
       try {
         const sub = await chrome.runtime.sendMessage({ action: "GET_SUBSCRIPTION_STATUS" });
         if (sub && sub.isTrialExpired && !sub.isLifetime) {
-          showToast("Trial expired. Please open extension to upgrade.");
           showTrialExpiredBanner(sub.purchaseUrl);
           enabled = false;
         }
@@ -314,7 +481,6 @@
       updateStatus("Paused (OFF)", "idle", "OFF");
     } else {
       updateStatus("Ready", "idle", "IDLE");
-      showToast("Extension Enabled (ON)");
     }
 
     chrome.storage.local.set({ extensionEnabled: enabled });
@@ -466,14 +632,6 @@
     }
   }
 
-  function showToast(message) {
-    const toast = document.getElementById("gemini-toast");
-    const toastMsg = document.getElementById("gemini-toast-msg");
-    if (!toast || !toastMsg) return;
-    toastMsg.innerText = message;
-    toast.classList.add("show");
-    setTimeout(() => toast.classList.remove("show"), 3500);
-  }
 
   function showInfo(infoText) {
     const box = document.getElementById("gemini-info-box");
@@ -642,19 +800,18 @@
       if (bestContainer) return bestContainer;
     }
 
-    // 5. Look for main single-question content wrapper
-    const candidateSelectors = [
-      "main", "#content", ".test-container", ".question-container",
-      ".question.active", ".active-question", ".current-question",
-      ".question-card", ".question", ".quiz-card", ".exercise"
-    ];
-
-    for (const selector of candidateSelectors) {
-      const el = document.querySelector(selector);
-      if (el && isElementVisible(el) && !el.closest("#gemini-live-host, header, nav, [class*='top-bar' i]")) {
-        return el;
+    // 4b. Check for .q-prompt or .q-stim semantic anchors
+    const qAnchor = document.querySelector("h2.q-prompt, .q-prompt, div.q-stim, .q-stim");
+    if (qAnchor && isElementVisible(qAnchor)) {
+      const qCard = qAnchor.closest(".lesson-stage, .question, .question-card, .quiz-card, .exercise, [role='region'], main, #content") || qAnchor.parentElement;
+      if (qCard && qCard !== document.body && isElementVisible(qCard)) {
+        return qCard;
       }
     }
+
+    // 5. Look for main single-question content wrapper via DOM_ADAPTER
+    const candidateContainer = querySmart(DOM_ADAPTER.containers.questionRoot);
+    if (candidateContainer) return candidateContainer;
 
     return document.body;
   }
@@ -734,73 +891,26 @@
   }
 
   // Check if current question is a Cloze / Multi-Blank Passage Question
+  // DOM Ground Truth: Discrete blanks in passage + Word chips + Reset button. Strictly NO radio buttons & NOT rearrange!
   function checkIsClozePassage(container) {
     const scope = (container && container !== document.body) ? container : document.body;
-    const pageText = (safeText(scope) + " " + (document.body ? safeText(document.body) : "")).toLowerCase();
 
-    // Must NOT be a sentence rearrangement question
-    const hasRearrangeKeywords = (
-      pageText.includes("rearrange the words or phrases") ||
-      pageText.includes("rearrange the phrases") ||
-      pageText.includes("rearrange the words") ||
-      pageText.includes("rearrange words") ||
-      pageText.includes("rearrange phrases") ||
-      pageText.includes("rearrange the sentence") ||
-      pageText.includes("arrange the following sentences") ||
-      pageText.includes("arrange the sentences") ||
-      pageText.includes("arrange sentences") ||
-      pageText.includes("form a logical sentence")
-    );
-    if (hasRearrangeKeywords) return false;
+    // Rule 1: If radio or checkbox inputs exist, this is an MCQ, NEVER a cloze passage!
+    const hasRadioInputs = Array.from(scope.querySelectorAll("input[type='radio'], input[type='checkbox'], [role='radio']")).some(isElementVisible);
+    if (hasRadioInputs) return false;
 
-    // Check for visible Reset button on page (MANDATORY for StepTest cloze & rearrange questions)
-    const hasVisibleResetBtn = Array.from(document.querySelectorAll("button, a, input[type='button'], div[role='button']"))
+    // Rule 2: If it's a sentence rearrangement question, it is NEVER a cloze passage!
+    if (checkIsRearrangeQuestion(container)) return false;
+
+    // Rule 3: Must have a visible Reset button
+    const hasVisibleResetBtn = Array.from(document.querySelectorAll("button, a, input, div[role='button']"))
       .some(b => isElementVisible(b) && !isNavOrSystem(b) && safeText(b).toLowerCase().startsWith("reset"));
+    if (!hasVisibleResetBtn) return false;
 
-    // In StepTest / exams, cloze questions ALWAYS require a Reset button to reset placed chips
-    if (!hasVisibleResetBtn) {
-      return false;
-    }
-
-    // Exclude single-choice questions (e.g. "1. Fill in the blank", "best answer from the following", "fill in the blank with the best answer")
-    const isSingleChoicePrompt = (
-      pageText.includes("fill in the blank with the best answer") ||
-      pageText.includes("fill in the blank with the correct") ||
-      pageText.includes("best answer from the following") ||
-      pageText.includes("select the best answer") ||
-      pageText.includes("select the suitable word") ||
-      pageText.includes("choose the best answer")
-    );
-
-    // Check for explicit multiple blank markers: [blank 1], [blank 2] or multiple occurrences of [____] or blanks
-    const blankMatches = pageText.match(/\[\s*blank\s*\d*\s*\]|\[\s*_\s*\]|\[\s*\]|_{2,}/gi) || [];
-    if (isSingleChoicePrompt && blankMatches.length <= 1) {
-      return false;
-    }
-
-    const hasClozeKeywords = (
-      pageText.includes("words for the blanks") ||
-      pageText.includes("choosing the correct words") ||
-      pageText.includes("words that best complete") ||
-      pageText.includes("fill in the blanks with suitable words") ||
-      pageText.includes("fill in the blanks with words") ||
-      pageText.includes("fill in the blanks") ||
-      pageText.includes("fill in each blank") ||
-      pageText.includes("suitable words for the blank") ||
-      pageText.includes("complete the passage") ||
-      pageText.includes("complete the airport announcement") ||
-      pageText.includes("complete the announcement") ||
-      pageText.includes("passage in a logical sequence")
-    );
-
-    const hasBlankDom = Array.from(document.querySelectorAll("[class*='blank' i], [class*='slot' i], [class*='drop' i], [class*='gap' i], [class*='target' i], [data-blank], [data-slot], [class*='droppable' i]"))
-      .some(el => isElementVisible(el) && !el.closest("#gemini-live-host, #steptest-ai-banner"));
-
-    if (hasClozeKeywords || hasBlankDom || blankMatches.length >= 2) {
-      return true;
-    }
-
-    return false;
+    // Rule 4: Must have at least 2 cloze blanks and at least 2 word chips
+    const blanks = findClozeBlanks(scope);
+    const chips = findClozeChips(scope);
+    return blanks.length >= 2 && chips.length >= 2;
   }
 
   // Extract clickable word choice chips for multi-blank passage
@@ -814,7 +924,8 @@
       const txt = safeText(el);
       if (!txt || txt.length < 1 || txt.length > 60) return false;
       const lower = txt.toLowerCase();
-      if (/^(reset|submit|next|replay|play|save|continue|grade)\b/i.test(lower)) return false;
+      if (/^(reset|submit|next|replay|play|save|continue|grade|exit|exit lesson)\b/i.test(lower)) return false;
+      if (el.closest("[data-testid='answer-zone'], [data-testid*='cloze-blank'], [class*='min-h-[2.5rem]']")) return false; // Placed chips in answer work area
       if (lower.startsWith("fill in the blank")) return false;
       if (lower.startsWith("complete the passage")) return false;
       if (lower.startsWith("complete the airport")) return false;
@@ -893,9 +1004,10 @@
       if (chips.length >= 2) return chips;
     }
 
-    // Strategy 2: Candidate buttons or chip classes
-    const candidates = Array.from(scope.querySelectorAll("button, [class*='chip' i], [class*='choice' i], [class*='option' i], [class*='word' i], [class*='pill' i], [class*='card' i], [class*='item' i], [class*='token' i]"))
-      .filter(isLeafChip);
+    // Strategy 2: Candidate buttons, rounded-pill chips, or word bank containers
+    const candidates = Array.from(scope.querySelectorAll(
+      "button.rounded-pill, button[class*='rounded-pill'], .space-y-1 .flex-wrap button, .flex.flex-wrap.gap-2 button, [data-testid*='word-bank'] button, button, [class*='chip' i], [class*='choice' i], [class*='option' i], [class*='word' i], [class*='pill' i], [class*='card' i], [class*='item' i], [class*='token' i]"
+    )).filter(isLeafChip);
 
     candidates.forEach(el => {
       const t = safeText(el);
@@ -914,12 +1026,9 @@
   // Extract blank slots in passage in document reading order
   function findClozeBlanks(container) {
     const scope = (container && container !== document.body) ? container : document.body;
-    const blanks = Array.from(scope.querySelectorAll(
-      "[class*='blank' i], [class*='slot' i], [class*='drop' i], [class*='gap' i], [class*='target' i], [class*='droppable' i], [class*='placeholder' i], [data-blank], [data-slot], [data-index], input:not([type='button']):not([type='submit']):not([type='radio']):not([type='checkbox'])"
-    )).filter(el => {
-      if (!isElementVisible(el) || el.closest("#gemini-live-host, #steptest-ai-banner, header, nav")) return false;
+    const blanks = querySmartAll(DOM_ADAPTER.interactive.clozeBlanks, scope).filter(el => {
       const t = safeText(el).toLowerCase();
-      return !/^(reset|submit|next)\b/i.test(t);
+      return !/^(reset|submit|next|exit)\b/i.test(t);
     });
 
     // Also scan passage paragraphs for rounded empty inline boxes / drop zones
@@ -957,68 +1066,101 @@
     return blanks;
   }
 
-  // Check if current question is a Sentence / Phrase Rearrangement question
+  // Check if current question is a Sentence / Phrase / Statement Rearrangement question
+  // DOM Ground Truth: Word bank tokens + Answer work zone ("Your sentence" / slots). Strictly NO radio buttons!
   function checkIsRearrangeQuestion(container) {
     const scope = (container && container !== document.body) ? container : document.body;
-    const pageText = (safeText(scope) + " " + (document.body ? safeText(document.body) : "")).toLowerCase();
 
-    // Must NOT be a cloze passage question
-    const hasClozeKeywords = (
-      pageText.includes("fill in the blanks with suitable words") ||
-      pageText.includes("complete the passage") ||
-      pageText.includes("passage in a logical sequence") ||
-      pageText.includes("fill in the blank above") ||
-      pageText.includes("choices below")
-    );
-    if (hasClozeKeywords) return false;
-
-    // CRITICAL: If visible radio buttons exist, this is an MCQ (e.g. sequence ordering ABCD / DCAB), NOT chip rearrange!
-    const hasRadioInputs = Array.from(document.querySelectorAll("input[type='radio']")).some(isElementVisible);
+    // Rule 1: Strictly NO radio or checkbox inputs (If radios exist, this is an MCQ ordering question, NOT chip rearrange!)
+    const hasRadioInputs = Array.from(scope.querySelectorAll("input[type='radio'], input[type='checkbox'], [role='radio']")).some(isElementVisible);
     if (hasRadioInputs) return false;
 
-    // CRITICAL: "Fill in the blank" / "Choose the correct" questions are NEVER sentence rearrangements!
-    const isFillBlankOrChoose = (
-      pageText.includes("fill in the blank") ||
-      pageText.includes("fill in the blanks") ||
-      pageText.includes("fill in the missing") ||
-      pageText.includes("select the best answer") ||
-      pageText.includes("choose the best") ||
-      pageText.includes("choose the correct") ||
-      pageText.includes("select the correct") ||
-      pageText.includes("select the suitable") ||
-      pageText.includes("choose the suitable") ||
-      pageText.includes("best answer from the following")
-    );
-
-    const hasRearrangeKeywords = (
-      pageText.includes("rearrange the words or phrases") ||
-      pageText.includes("rearrange the phrases") ||
-      pageText.includes("rearrange the words") ||
-      pageText.includes("rearrange words") ||
-      pageText.includes("rearrange phrases") ||
-      pageText.includes("rearrange the sentence") ||
-      pageText.includes("arrange the following sentences") ||
-      pageText.includes("arrange the sentences") ||
-      pageText.includes("arrange sentences") ||
-      pageText.includes("arrange the words") ||
-      pageText.includes("arrange the phrases") ||
-      pageText.includes("form a logical sentence") ||
-      pageText.includes("form a sentence") ||
-      (pageText.includes("rearrange") && pageText.includes("read it aloud"))
-    );
-
-    if (isFillBlankOrChoose && !hasRearrangeKeywords) {
+    // Rule 2: Strictly NO textarea writing tasks
+    const hasWritingArea = Array.from(scope.querySelectorAll("textarea:not(.gemini-input), [contenteditable='true']")).some(isElementVisible);
+    const scopeTxt = (safeText(scope) + " " + (document.body ? safeText(document.body) : "")).toLowerCase();
+    if (hasWritingArea && (scopeTxt.includes("write a") || scopeTxt.includes("word limit") || scopeTxt.includes("word count"))) {
       return false;
     }
 
-    if (hasRearrangeKeywords) return true;
+    // Rule 3: Structural Ground Truth — check FIRST before token scan.
+    // findRearrangeTokens may miss chips on certain HTML layouts even when Word Bank + Your Sentence
+    // are unmistakably present. Structural signals are the most reliable ground truth.
+    const hasWordBankLabel = Array.from(scope.querySelectorAll("div, span, p, label")).some(el => {
+      if (!isElementVisible(el) || isNavOrSystem(el)) return false;
+      const t = safeText(el).trim().toLowerCase();
+      return t === "word bank" || t.startsWith("word bank");
+    });
 
-    // Reset button check: search visible buttons on page ONLY with genuine slot dashes
-    const hasVisibleResetBtn = Array.from(document.querySelectorAll("button, a, input, div, span, [role='button']"))
+    // NOTE: .border-line is intentionally NOT in this selector because chip <button> elements
+    // on StepTest have class 'border border-line', which would cause false positives.
+    // Also explicitly exclude .min-h-screen so Tailwind's page shell does not false-match.
+    const hasAnswerWorkZone = Array.from(scope.querySelectorAll(
+      "[data-testid='answer-zone'], [data-testid*='answer'], div.flex.flex-wrap[class*='min-h-'], [class*='min-h-['], .answer-zone, [data-drop-zone]"
+    )).some(el => isElementVisible(el) && !el.matches(".min-h-screen, [class*='min-h-screen']"));
+
+    const hasYourSentenceLabel = scopeTxt.includes("your sentence") || scopeTxt.includes("tap chips below");
+
+    // PRIMARY SIGNAL: Word bank + Your sentence / answer work zone is conclusive.
+    // Return true immediately — no token count needed.
+    if (hasWordBankLabel && (hasAnswerWorkZone || hasYourSentenceLabel)) {
+      return true;
+    }
+
+    // Rule 4: Token scan (secondary signal when structural signals are absent)
+    const tokens = findRearrangeTokens(scope);
+    if (tokens.length < 2) return false;
+
+    // Rule 5: Keyword Prompts for Rearrangement — SPECIFIC full-phrase matches only!
+    // NEVER use a standalone short word like "rearrange" — it causes false positives on MCQs
+    // that merely mention the word in their content or instructions.
+    const hasRearrangePrompt = (
+      scopeTxt.includes("rearrange the words or phrases") ||
+      scopeTxt.includes("rearrange the phrases") ||
+      scopeTxt.includes("rearrange the words") ||
+      scopeTxt.includes("rearrange the following") ||
+      scopeTxt.includes("rearrange the sentence") ||
+      scopeTxt.includes("rearrange the statements") ||
+      scopeTxt.includes("rearrange to form") ||
+      scopeTxt.includes("rearrange words to form") ||
+      scopeTxt.includes("rearrange the given") ||
+      scopeTxt.includes("arrange the following statements") ||
+      scopeTxt.includes("arrange the following sentences") ||
+      scopeTxt.includes("arrange the following words") ||
+      scopeTxt.includes("arrange the following phrases") ||
+      scopeTxt.includes("arrange the sentences") ||
+      scopeTxt.includes("arrange the words") ||
+      scopeTxt.includes("arrange these sentences") ||
+      scopeTxt.includes("arrange these words") ||
+      scopeTxt.includes("increasing order of politeness") ||
+      scopeTxt.includes("decreasing order of politeness") ||
+      scopeTxt.includes("increasing order of formality") ||
+      scopeTxt.includes("decreasing order of formality") ||
+      scopeTxt.includes("order of politeness") ||
+      scopeTxt.includes("order of formality") ||
+      scopeTxt.includes("form a logical sentence") ||
+      scopeTxt.includes("form a sentence using") ||
+      scopeTxt.includes("form a sentence with") ||
+      scopeTxt.includes("form a sentence from") ||
+      scopeTxt.includes("form a sentence requesting") ||
+      scopeTxt.includes("tap chips below to build your answer") ||
+      scopeTxt.includes("——")
+    );
+
+    // Rule 5 requires BOTH a keyword AND a structural signal (work zone or tokens in word bank)
+    if (hasRearrangePrompt && (hasAnswerWorkZone || hasYourSentenceLabel)) {
+      return true;
+    }
+    // Also accept keyword + tokens if there's a visible word bank structure
+    if (hasRearrangePrompt && hasWordBankLabel && tokens.length >= 2) {
+      return true;
+    }
+
+    // Rule 6: Legacy StepTest layout (Visible Reset button + slot dashes/quotes)
+    const hasVisibleResetBtn = Array.from(document.querySelectorAll("button, a, input, div[role='button']"))
       .some(b => isElementVisible(b) && !isNavOrSystem(b) && safeText(b).toLowerCase().startsWith("reset"));
+    const hasSlotDashes = (scopeTxt.includes("——") || scopeTxt.includes("––") || scopeTxt.includes("— —")) || (scopeTxt.includes("“") && scopeTxt.includes("”"));
 
-    const hasSlotDashes = (pageText.includes("——") || pageText.includes("––") || pageText.includes("— —")) && (pageText.includes("“") || pageText.includes("”"));
-    if (hasVisibleResetBtn && hasSlotDashes) {
+    if (hasVisibleResetBtn && (hasSlotDashes || hasAnswerWorkZone)) {
       return true;
     }
 
@@ -1036,8 +1178,23 @@
       const txt = safeText(el);
       if (!txt || txt.length < 1 || txt.length > 450) return false;
       const lower = txt.toLowerCase();
-      if (/^(reset|submit|next|replay|play|save|continue|grade|abc|record|speak|mic|listen)\b/i.test(lower)) return false;
+      if (/^(reset|submit|next|replay|play|save|continue|grade|abc|record|speak|mic|listen|exit|exit lesson)\b/i.test(lower)) return false;
+      
+      // Exclude chips placed inside the answer work area ("Your sentence")
+      const workZone = el.closest("[data-testid='answer-zone'], [data-drop-zone], .answer-zone, div.flex.flex-wrap[class*='min-h-'], [class*='min-h-[']");
+      if (workZone && !workZone.matches(".min-h-screen, [class*='min-h-screen']")) {
+        const wzText = safeText(workZone).toLowerCase();
+        if (wzText.includes("your sentence") && !wzText.includes("word bank")) return false;
+        if (workZone.matches("[data-testid='answer-zone'], [data-drop-zone], .answer-zone")) return false;
+      }
+      const parentCard = el.closest(".rounded-card, fieldset");
+      if (parentCard) {
+        const pcText = safeText(parentCard).toLowerCase();
+        if (pcText.includes("your sentence") && !pcText.includes("word bank")) return false;
+      }
+
       if (lower.startsWith("rearrange the words or phrases")) return false;
+      if (lower.startsWith("arrange the following statements")) return false;
       if (lower.startsWith("arrange the following sentences")) return false;
       if (lower.startsWith("form a logical sentence")) return false;
       if (lower.startsWith("if the video is not loading")) return false;
@@ -1058,7 +1215,35 @@
       return !hasChipChild;
     }
 
-    // Strategy 0: Find instruction anchor within the current question scope
+    // Strategy 0: Direct "Word bank" section resolution (Ground Truth for StepTest Tailwind SPAs)
+    const wordBankLabels = Array.from(scope.querySelectorAll("div, span, p, label")).filter(el => {
+      if (!isElementVisible(el) || isNavOrSystem(el)) return false;
+      const t = safeText(el).trim().toLowerCase();
+      return t === "word bank" || t.startsWith("word bank");
+    });
+    for (const wb of wordBankLabels) {
+      const parent = wb.closest(".space-y-1, .space-y-2, .space-y-4") || wb.parentElement;
+      const chipContainer = parent ? (parent.querySelector(".flex-wrap, .gap-2") || parent) : wb.nextElementSibling;
+      if (chipContainer) {
+        const chips = Array.from(chipContainer.querySelectorAll("button, .rounded-pill, [role='button']")).filter(isLeafChip);
+        if (chips.length >= 2) {
+          chips.forEach(el => {
+            if (!seen.has(el)) {
+              seen.add(el);
+              tokens.push({
+                element: el,
+                index: tokens.length,
+                id: `token_${tokens.length}`,
+                text: safeText(el)
+              });
+            }
+          });
+          if (tokens.length >= 2) return tokens;
+        }
+      }
+    }
+
+    // Strategy 1: Find instruction anchor within the current question scope
     const allLabels = Array.from(scope.querySelectorAll("*")).filter(el => isElementVisible(el) && !isNavOrSystem(el));
     const matchingAnchors = allLabels.filter(el => {
       const t = safeText(el).toLowerCase();
@@ -1069,9 +1254,13 @@
         t.includes("rearrange the sentence") ||
         t.includes("rearrange words") ||
         t.includes("rearrange phrases") ||
+        t.includes("arrange the following statements") ||
         t.includes("arrange the following sentences") ||
+        t.includes("arrange the following") ||
         t.includes("arrange the sentences") ||
         t.includes("arrange the words") ||
+        t.includes("increasing order") ||
+        t.includes("order of politeness") ||
         t.includes("form a logical sentence") ||
         t.includes("form sentences") ||
         t.includes("form a sentence")
@@ -1116,15 +1305,15 @@
             });
           }
         }
-        if (tokens.length >= 3) return tokens;
+        if (tokens.length >= 2) return tokens;
       }
     }
 
-    // Strategy A: Direct container holding 3 to 15 leaf chips
+    // Strategy A: Direct container holding 2 to 15 leaf chips
     const candidateContainers = Array.from(scope.querySelectorAll("div, ul, section, ol")).filter(p => {
       if (!isElementVisible(p) || p.closest("#gemini-live-host, header, nav, video, iframe")) return false;
       const leafChips = Array.from(p.querySelectorAll("*")).filter(isLeafChip);
-      return leafChips.length >= 3 && leafChips.length <= 15;
+      return leafChips.length >= 2 && leafChips.length <= 15;
     });
 
     if (candidateContainers.length > 0) {
@@ -1142,19 +1331,14 @@
           });
         }
       });
-      if (tokens.length >= 3) return tokens;
+      if (tokens.length >= 2) return tokens;
     }
 
-    // Strategy B: Known chip / phrase classes
-    const chipSelectors = [
-      ".word-chip", ".sentence-token", ".draggable-word", ".sortable-item",
-      ".word-tile", "[data-word]", "[class*='phrase' i]", "[class*='chip' i]",
-      "[class*='token' i]", "[class*='badge' i]", ".btn-phrase", ".pill",
-      "[class*='sentence' i]", "[class*='block' i]", "[class*='tile' i]"
-    ];
+    // Strategy B: Known chip / phrase classes & Word Bank containers via DOM_ADAPTER
+    const chipSelectors = (DOM_ADAPTER && DOM_ADAPTER.interactive && DOM_ADAPTER.interactive.rearrangeTokens) || [];
     for (const sel of chipSelectors) {
       const found = Array.from(scope.querySelectorAll(sel)).filter(isLeafChip);
-      if (found.length >= 3 && found.length <= 15) {
+      if (found.length >= 2 && found.length <= 15) {
         found.forEach((el) => {
           const t = safeText(el);
           if (!seen.has(el)) {
@@ -1162,7 +1346,7 @@
             tokens.push({ element: el, index: tokens.length, id: `token_${tokens.length}`, text: t });
           }
         });
-        if (tokens.length >= 3) return tokens;
+        if (tokens.length >= 2) return tokens;
       }
     }
 
@@ -1180,7 +1364,7 @@
 
     // CRITICAL: Only suppress MCQ options if confirmed interactive chips/tokens exist for Cloze or Rearrange!
     if (
-      (checkIsRearrangeQuestion(scope) && findRearrangeTokens(scope).length >= 3) ||
+      (checkIsRearrangeQuestion(scope) && findRearrangeTokens(scope).length >= 2) ||
       (checkIsClozePassage(scope) && findClozeChips(scope).length >= 2 && findClozeBlanks(scope).length >= 2)
     ) {
       return [];
@@ -1197,6 +1381,21 @@
       // Do not add navigation / submit buttons as options
       if (/^(submit|next|save|continue|reset|replay|review)\b/i.test(cleaned)) return;
       if (el.matches("button[type='submit'], input[type='submit']")) return;
+
+      // CRITICAL GUARD: Never treat Word Bank chips, "Your sentence" tokens, or rearrange chips as MCQ options!
+      const parentWordBank = el.closest(".space-y-1, .space-y-2, .space-y-4, .border-line, [data-testid='answer-zone'], [data-drop-zone]");
+      if (parentWordBank) {
+        const pTxt = safeText(parentWordBank).toLowerCase();
+        if (pTxt.includes("word bank") || pTxt.includes("your sentence") || pTxt.includes("tap chips below")) {
+          return;
+        }
+      }
+      if (el.matches(".rounded-pill, [data-testid='answer-zone'] *, .border-line button")) {
+        const containerText = safeText(el.closest("div, section") || el.parentElement).toLowerCase();
+        if (containerText.includes("word bank") || containerText.includes("your sentence") || containerText.includes("tap chips below")) {
+          return;
+        }
+      }
 
       seenElements.add(el);
       options.push({
@@ -1283,27 +1482,8 @@
       if (options.length >= 2) return options;
     }
 
-    // Strategy 3: Common CSS class selectors for quiz options
-    const optionSelectors = [
-      "[class*='option' i]",
-      "[class*='choice' i]",
-      "[class*='answer' i]",
-      "[class*='ans' i]",
-      "[class*='radio' i]",
-      "[role='radio']",
-      "[role='checkbox']",
-      "[role='option']",
-      ".mat-radio-button",
-      "mat-radio-button",
-      ".custom-control",
-      "[aria-checked]",
-      "[data-option]",
-      "[data-choice]",
-      "[data-value]",
-      ".selectable",
-      "[class*='selectable' i]",
-      "[class*='chip' i]:not([class*='slot' i])"
-    ];
+    // Strategy 3: Common CSS class selectors for quiz options via DOM_ADAPTER
+    const optionSelectors = (DOM_ADAPTER && DOM_ADAPTER.interactive && DOM_ADAPTER.interactive.mcqOptions) || [];
 
     for (const sel of optionSelectors) {
       const candidates = Array.from(scope.querySelectorAll(sel)).filter(el => {
@@ -1348,6 +1528,15 @@
   function getCleanContext(container) {
     if (!container) return "";
     try {
+      // Prioritize semantic stimulus container if present (.q-stim)
+      const stimEl = container.querySelector(".q-stim") || document.querySelector(".q-stim");
+      if (stimEl && isElementVisible(stimEl)) {
+        const stimClone = stimEl.cloneNode(true);
+        stimClone.querySelectorAll("#gemini-live-host, button.btn-control").forEach(n => n.remove());
+        const stimTxt = (stimClone.innerText || stimClone.textContent || "").replace(/\s+/g, " ").trim();
+        if (stimTxt.length > 5) return stimTxt;
+      }
+
       const clone = container.cloneNode(true);
       clone.querySelectorAll("#gemini-live-host, header, nav, footer, video, iframe, [class*='player' i], [class*='video' i], .ytp-chrome-bottom, button, input[type='button']").forEach(n => n.remove());
       let txt = clone.innerText || clone.textContent || "";
@@ -1391,18 +1580,11 @@
     }
 
     if (!questionText) {
-      const promptSelectors = [
-        ".question-title", ".question-text", ".prompt", ".instruction",
-        "h1, h2, h3, h4", "legend", "p.title", "label.question-label"
-      ];
-      for (const sel of promptSelectors) {
-        const el = container.querySelector(sel);
-        if (el && isElementVisible(el) && !isNavOrSystem(el)) {
-          const t = safeText(el);
-          if (t.length > 10) {
-            questionText = t;
-            break;
-          }
+      const promptEl = querySmart(DOM_ADAPTER.prompts, container) || querySmart(DOM_ADAPTER.prompts, document);
+      if (promptEl) {
+        const t = safeText(promptEl);
+        if (t.length > 5) {
+          questionText = t;
         }
       }
     }
@@ -1412,25 +1594,21 @@
       questionText = cleanContext;
     }
 
-    // 2. Check if this is a Cloze / Multi-Blank Passage Question
-    const isCloze = checkIsClozePassage(container);
+    // 2. Sentence Rearrangement Question Detection (Unique: Tokens + Reset + Answer Work Zone, strictly NO radios)
+    const finalIsRearrange = checkIsRearrangeQuestion(container);
+    let sentenceTokens = [];
+    if (finalIsRearrange) {
+      sentenceTokens = findRearrangeTokens(container);
+    }
+
+    // 3. Cloze / Multi-Blank Passage Detection (Unique: Multiple blanks + Word chips + Reset, strictly NO radios & NOT rearrange)
+    const finalIsCloze = !finalIsRearrange && checkIsClozePassage(container);
     let clozeChips = [];
     let clozeBlanks = [];
-    if (isCloze) {
+    if (finalIsCloze) {
       clozeChips = findClozeChips(container);
       clozeBlanks = findClozeBlanks(container);
     }
-    const hasMultipleBlanks = clozeBlanks.length >= 2 || (clozeChips.length >= 2 && /\[\s*blank\s*[12]|\[\s*_\s*\]|\[\s*\]|_{2,}.*_{2,}/is.test(cleanContext));
-    const finalIsCloze = isCloze && clozeChips.length >= 2 && hasMultipleBlanks;
-
-    // 3. Check if this is a Sentence Rearrangement Question (Scoped strictly to active container)
-    const isRearrange = !finalIsCloze && checkIsRearrangeQuestion(container);
-    let sentenceTokens = [];
-    if (isRearrange) {
-      sentenceTokens = findRearrangeTokens(container);
-    }
-    // Question is rearrangement ONLY if rearrange keywords/Reset exist AND at least 3 visible chips are found
-    const finalIsRearrange = isRearrange && sentenceTokens.length >= 3;
 
     // 4. Identify Options (Disabled for cloze and rearrange questions)
     const options = (finalIsCloze || finalIsRearrange) ? [] : findMCQOptions(container);
@@ -1470,16 +1648,11 @@
       });
     });
 
-    // 7. Identify Writing Area (Check container and full document fallback)
-    const writingSelectors = "textarea:not(.gemini-input), [contenteditable='true'], [contenteditable=''], [contenteditable], [role='textbox'], .ql-editor, .fr-element, .monaco-editor, .public-DraftEditor-content, div.editable";
-    let writingAreas = Array.from(
-      container.querySelectorAll(writingSelectors)
-    ).filter(el => isElementVisible(el) && !el.closest("#gemini-live-host, #gemini-answer-banner"));
+    // 7. Identify Writing Area (Check container and full document fallback) via DOM_ADAPTER
+    let writingAreas = querySmartAll(DOM_ADAPTER.writing, container);
 
     if (writingAreas.length === 0 && document.body) {
-      writingAreas = Array.from(
-        document.querySelectorAll(writingSelectors)
-      ).filter(el => isElementVisible(el) && !el.closest("#gemini-live-host, #gemini-answer-banner") && !isNavOrSystem(el));
+      writingAreas = querySmartAll(DOM_ADAPTER.writing, document.body);
     }
 
     const fullTextForWriting = (questionText + " " + cleanContext).toLowerCase();
@@ -1515,20 +1688,22 @@
     );
     const hasActiveMic = !!micButton && isElementVisible(micButton);
 
-    // Classify Question Type
-    let detectedType = "auto_detect";
-    if (finalIsCloze) {
-      detectedType = "cloze_passage";
+    // Classify Question Type - Simple, Separate & Unique
+    let detectedType = "mcq";
+    if (hasActiveMic) {
+      detectedType = "speaking";
     } else if (finalIsWriting) {
       detectedType = "writing";
-    } else if (finalIsRearrange) {
+    } else if (dropdowns.length > 0) {
+      detectedType = "choose_word";
+    } else if (finalIsRearrange && sentenceTokens.length >= 2) {
       detectedType = "rearrange_sentence";
+    } else if (finalIsCloze && clozeChips.length >= 2 && clozeBlanks.length >= 2) {
+      detectedType = "cloze_passage";
+    } else if (textBlanks.length > 0 && options.length === 0) {
+      detectedType = "choose_word";
     } else if (options.length > 0) {
       detectedType = "mcq";
-    } else if (dropdowns.length > 0 || textBlanks.length > 0) {
-      detectedType = "choose_word";
-    } else if (hasActiveMic) {
-      detectedType = "speaking";
     }
 
     return {
@@ -1565,13 +1740,17 @@
       prefix = `Q_${meta.currentNum}`;
     }
 
+    // 1. Question Type Tag (ensures different question types with the same prompt never collide)
+    const typeTag = (data && data.type) ? data.type : "q";
+
+    // 2. Prompt title snippet
     let titlePart = "";
     if (data && data.questionText && data.questionText.length > 5) {
-      titlePart = data.questionText.slice(0, 50).replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+      titlePart = data.questionText.slice(0, 40).replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
     } else if (container) {
       const headerEl = container.querySelector("h1, h2, h3, h4, p");
       if (headerEl) {
-        titlePart = safeText(headerEl).slice(0, 50).replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+        titlePart = safeText(headerEl).slice(0, 40).replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
       }
     }
 
@@ -1583,10 +1762,30 @@
       }
     }
 
-    if (prefix && titlePart) {
-      return `${prefix}::${titlePart}`;
+    // 3. Unique Content / Option Fingerprint:
+    // Ensures that when the SAME prompt is presented for multiple consecutive questions,
+    // their identifiers are completely distinct and never collide!
+    let contentFingerprint = "";
+    if (data) {
+      if (data.options && data.options.length > 0) {
+        contentFingerprint = data.options.map(o => (o.text || "").slice(0, 15)).join("-");
+      } else if (data.sentenceTokens && data.sentenceTokens.length > 0) {
+        contentFingerprint = data.sentenceTokens.map(t => (t.text || "").slice(0, 10)).join("-");
+      } else if (data.wordChoices && data.wordChoices.length > 0) {
+        contentFingerprint = data.wordChoices.map(c => (c.text || "").slice(0, 10)).join("-");
+      } else if (data.dropdowns && data.dropdowns.length > 0) {
+        contentFingerprint = data.dropdowns.map(d => d.name || d.id || d.index).join("-");
+      } else if (data.context && data.context.length > 10) {
+        contentFingerprint = data.context.slice(0, 30).replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+      }
     }
-    return prefix || titlePart || "active_question";
+
+    if (contentFingerprint) {
+      contentFingerprint = contentFingerprint.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40).toLowerCase();
+    }
+
+    const parts = [typeTag, prefix, titlePart, contentFingerprint].filter(Boolean);
+    return parts.join("::") || "active_question";
   }
 
   // Token-Saver: Check if question is already answered on screen
@@ -1623,11 +1822,13 @@
     }
 
     // 2. Rearrange: Have all tokens already been placed into slots?
-    if (data.type === "rearrange_sentence" && container && data.sentenceTokens && data.sentenceTokens.length >= 3) {
+    if (data.type === "rearrange_sentence" && container && data.sentenceTokens && data.sentenceTokens.length >= 2) {
       const placedChips = container.querySelectorAll(
         "[class*='slot' i] [class*='chip' i], [class*='chip' i].selected, [class*='token' i].selected, [class*='phrase' i].selected"
       );
-      if (placedChips.length >= data.sentenceTokens.length) {
+      const answerZone = container.querySelector("[data-testid='answer-zone'], [data-drop-zone], .answer-zone, div.flex.flex-wrap[class*='min-h-']:not(.min-h-screen), [class*='min-h-[']");
+      const chipsInAnswerZone = answerZone ? answerZone.querySelectorAll("button, .rounded-pill, [class*='chip' i]") : [];
+      if (placedChips.length >= data.sentenceTokens.length || chipsInAnswerZone.length >= data.sentenceTokens.length) {
         return true;
       }
     }
@@ -1675,6 +1876,13 @@
     )).filter(isElementVisible);
     if (placedChips.length > 0) return true;
 
+    // 3b. Chips in "Your sentence" work zone
+    const answerZone = scope.querySelector("[data-testid='answer-zone'], [data-drop-zone], .answer-zone, div.flex.flex-wrap[class*='min-h-']:not(.min-h-screen), [class*='min-h-[']");
+    if (answerZone) {
+      const placedInZone = Array.from(answerZone.querySelectorAll("button, .rounded-pill, [class*='chip' i]")).filter(isElementVisible);
+      if (placedInZone.length > 0) return true;
+    }
+
     // 4. Populated text inputs
     const textInputs = Array.from(scope.querySelectorAll("input[type='text'], textarea:not(.gemini-input)")).filter(isElementVisible);
     if (textInputs.some(inp => (inp.value || "").trim().length > 0)) return true;
@@ -1713,58 +1921,93 @@
 
     highlightElement(element);
 
-    const isDirectButton = element.tagName === "BUTTON" ||
-                           element.tagName === "A" ||
-                           element.type === "submit" ||
-                           element.type === "button" ||
-                           element.getAttribute("role") === "button";
+    // If element is inside a button, link, or label, target the interactive container directly!
+    // NEVER dispatch separate clicks to both a child element and its parent button (prevents duplicate clicks).
+    const clickableContainer = element.closest("button, [role='button'], [role='radio'], a, label");
+    const target = clickableContainer || element;
 
-    const targets = new Set([element]);
+    // Check for radio/checkbox input inside or adjacent
+    const input = target.tagName === "INPUT"
+      ? target
+      : (target.querySelector("input[type='radio'], input[type='checkbox']") ||
+         (target.parentElement ? target.parentElement.querySelector("input[type='radio'], input[type='checkbox']") : null));
 
-    if (!isDirectButton) {
-      // Find radio/checkbox input inside, or sibling, or closest clickable container
-      const input = element.querySelector("input[type='radio'], input[type='checkbox']") ||
-        (element.parentElement ? element.parentElement.querySelector("input[type='radio'], input[type='checkbox']") : null);
-
-      const clickableContainer = element.closest(
-        "button, [role='button'], [role='radio'], label, [class*='option' i], [class*='choice' i], [class*='card' i], [class*='item' i], [class*='chip' i], [class*='token' i], [class*='pill' i], [class*='answer' i], [class*='select' i], li"
-      );
-
-      if (input) targets.add(input);
-      if (clickableContainer) targets.add(clickableContainer);
-      if (element.parentElement && element.parentElement !== document.body) {
-        targets.add(element.parentElement);
-      }
-
-      if (input) {
-        try {
-          input.checked = true;
-          input.dispatchEvent(new Event("input", { bubbles: true }));
-          input.dispatchEvent(new Event("change", { bubbles: true }));
-        } catch (_) {}
-      }
+    if (input && input !== target) {
+      try {
+        input.checked = true;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      } catch (_) {}
     }
 
-    const clickEvents = ["pointerdown", "mousedown", "pointerup", "mouseup", "click"];
-    targets.forEach(tgt => {
-      clickEvents.forEach(evtName => {
-        try {
-          if (evtName.startsWith("pointer") && typeof PointerEvent !== "undefined") {
-            tgt.dispatchEvent(new PointerEvent(evtName, { bubbles: true, cancelable: true, view: window, pointerId: 1, pointerType: "mouse", isPrimary: true }));
-          } else {
-            tgt.dispatchEvent(new MouseEvent(evtName, { bubbles: true, cancelable: true, view: window }));
-          }
-        } catch (_) {}
-      });
-      try { tgt.click(); } catch (_) {}
+    // Calculate realistic center coordinates
+    let clientX = 0;
+    let clientY = 0;
+    try {
+      const rect = target.getBoundingClientRect();
+      clientX = Math.round(rect.left + Math.max(1, rect.width / 2));
+      clientY = Math.round(rect.top + Math.max(1, rect.height / 2));
+    } catch (_) {}
+
+    const eventInit = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      detail: 1,
+      clientX,
+      clientY,
+      screenX: (window.screenX || 0) + clientX,
+      screenY: (window.screenY || 0) + clientY,
+      button: 0,
+      buttons: 1
+    };
+
+    // Dispatch pointer and mouse down/up sequences for frameworks that require them
+    ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach(evtName => {
+      try {
+        if (evtName.startsWith("pointer") && typeof PointerEvent !== "undefined") {
+          target.dispatchEvent(new PointerEvent(evtName, {
+            ...eventInit,
+            pointerId: 1,
+            pointerType: "mouse",
+            isPrimary: true
+          }));
+        } else {
+          target.dispatchEvent(new MouseEvent(evtName, eventInit));
+        }
+      } catch (_) {}
     });
+
+    // Fire EXACTLY ONE click event: Native target.click() if available, else synthetic click event
+    let clickSucceeded = false;
+    try {
+      if (typeof target.click === "function") {
+        target.click();
+        clickSucceeded = true;
+      }
+    } catch (_) {}
+
+    if (!clickSucceeded) {
+      try {
+        target.dispatchEvent(new MouseEvent("click", eventInit));
+      } catch (_) {}
+    }
   }
 
   function setElementValue(element, val) {
     if (!element) return;
-    element.focus();
+    try { element.focus({ preventScroll: true }); } catch (_) { element.focus(); }
 
-    // 1. Try modern execCommand to trigger React / Angular / TinyMCE / Quill internal state
+    // 1. React 16/17/18 _valueTracker reset so React detects synthetic assignment
+    try {
+      const tracker = element._valueTracker;
+      if (tracker && typeof tracker.setValue === "function") {
+        tracker.setValue("" + Math.random());
+      }
+    } catch (_) {}
+
+    // 2. Try modern execCommand to trigger React / Angular / TinyMCE / Quill internal state
     let execSuccess = false;
     try {
       if (document.queryCommandSupported && document.queryCommandSupported("insertText")) {
@@ -1773,7 +2016,7 @@
       }
     } catch (_) {}
 
-    // 2. Value assignment and native setter fallback
+    // 3. Value assignment and native prototype setter fallback
     if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
       const prototype = element.tagName === "INPUT" ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype;
       const nativeSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
@@ -1789,14 +2032,14 @@
       }
     }
 
-    // 3. Dispatch comprehensive event chain to notify all frameworks
+    // 4. Dispatch comprehensive event chain to notify all frameworks
     try {
-      element.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: val }));
+      element.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, composed: true, inputType: "insertText", data: val }));
     } catch (_) {}
-    element.dispatchEvent(new Event("input", { bubbles: true }));
-    element.dispatchEvent(new Event("change", { bubbles: true }));
-    element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
-    element.dispatchEvent(new Event("blur", { bubbles: true }));
+    element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, composed: true, key: "Enter" }));
+    element.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
   }
 
   // Solve MCQ
@@ -2182,14 +2425,19 @@
   async function executeRearrange(solution, domRefs) {
     const container = domRefs?.container || findActiveQuestionContainer();
 
-    // 0. Clean Board Check: If any chips are already slotted or selected, click "Reset" first!
+    // 0. Clean Board Check: If any chips are already slotted or in answer zone, click "Reset" first!
     const resetBtn = Array.from(document.querySelectorAll("button, a, input, div, span, [role='button']")).find(b => {
       if (isNavOrSystem(b) || !isElementVisible(b)) return false;
       const txt = (b.innerText || b.value || "").trim().toLowerCase();
       return txt === "reset" || txt.startsWith("reset");
     });
 
-    const hasPlacedChips = (
+    const answerZone = document.querySelector(
+      "[data-testid='answer-zone'], [data-drop-zone], .answer-zone, div.flex.flex-wrap[class*='min-h-']:not(.min-h-screen), [class*='min-h-[']"
+    );
+    const chipsInAnswerZone = answerZone ? Array.from(answerZone.querySelectorAll("button, .rounded-pill, [role='button']")).filter(isElementVisible) : [];
+
+    const hasPlacedChips = chipsInAnswerZone.length > 0 || (
       document.querySelectorAll("[class*='slot' i] [class*='chip' i], [class*='slot' i] span, .word-slot:not(:empty)").length > 0 ||
       document.querySelectorAll("[class*='chip' i].selected, [class*='token' i].selected, [class*='phrase' i].selected").length > 0 ||
       document.querySelectorAll(".selected-chip, .placed-token, [data-placed='true']").length > 0
@@ -2198,13 +2446,13 @@
     if (resetBtn && hasPlacedChips) {
       console.log("[Gemini Live] Resetting rearrange slots to ensure clean insertion...");
       simulateClick(resetBtn);
-      await delay(350);
+      await delay(400);
     }
 
-    // Prefer domRefs.sentenceTokens if connected (ground truth matched to Gemini index), else scan
-    let tokens = (domRefs?.sentenceTokens?.length >= 3 && domRefs.sentenceTokens.every(t => t.element && t.element.isConnected))
-      ? domRefs.sentenceTokens
-      : findRearrangeTokens(container);
+    // Refresh tokens: If reset was clicked, always re-scan so we have live, connected elements from Word bank!
+    let tokens = (hasPlacedChips || !domRefs?.sentenceTokens?.length || !domRefs.sentenceTokens.every(t => t.element && t.element.isConnected))
+      ? findRearrangeTokens(container)
+      : domRefs.sentenceTokens;
 
     if (!tokens || tokens.length === 0) {
       tokens = domRefs && domRefs.sentenceTokens && domRefs.sentenceTokens.length > 0 ? domRefs.sentenceTokens : [];
@@ -2248,7 +2496,7 @@
       const uniqueIndices = [...new Set(validIndices)];
       const isIdentity = (uniqueIndices.length === totalCount) && uniqueIndices.every((val, idx) => val === idx);
 
-      if (uniqueIndices.length >= Math.min(totalCount, 3)) {
+      if (uniqueIndices.length >= Math.min(totalCount, 2)) {
         candidateIndices = {
           tokens: uniqueIndices.map(i => tokens[i]),
           isIdentity: isIdentity,
@@ -2442,8 +2690,20 @@
 
     // Sequentially click each token in order
     for (const token of orderedSequence) {
-      simulateClick(token.element);
-      await delay(Math.max(300, state.typingDelayMs || 250));
+      let targetEl = token.element;
+      // If the chip element got disconnected or re-rendered by React as earlier chips moved to the answer zone,
+      // dynamically resolve the live chip matching this token text from the Word Bank!
+      if (!targetEl || !targetEl.isConnected || !isElementVisible(targetEl)) {
+        const liveTokens = findRearrangeTokens(container);
+        const match = liveTokens.find(t => normalizeTokenText(t.text) === normalizeTokenText(token.text));
+        if (match && match.element && match.element.isConnected) {
+          targetEl = match.element;
+        }
+      }
+      if (targetEl && isElementVisible(targetEl)) {
+        simulateClick(targetEl);
+        await delay(Math.max(350, state.typingDelayMs || 250));
+      }
     }
 
     const fullSentence = solution.reconstructed_sentence || orderedSequence.map(t => t.text).join(" ");
@@ -2456,8 +2716,7 @@
   async function executeWriting(solution, domRefs) {
     let textarea = domRefs?.writingArea;
     if (!textarea || !textarea.isConnected) {
-      const writingSelectors = "textarea:not(.gemini-input), [contenteditable='true'], [contenteditable=''], [contenteditable], [role='textbox'], .ql-editor, .fr-element, .monaco-editor, .public-DraftEditor-content, div.editable";
-      textarea = document.querySelector(writingSelectors);
+      textarea = querySmart(DOM_ADAPTER.writing);
     }
     if (!textarea) {
       const warnMsg = "No writing textarea detected on page.";
@@ -2540,6 +2799,14 @@
   // Button Finder & Auto-Advance Controller
   // -------------------------------------------------------------
   function findActionElement(actionType) {
+    // 0. Primary: Direct match via DOM_ADAPTER.actions
+    if (DOM_ADAPTER && DOM_ADAPTER.actions && DOM_ADAPTER.actions[actionType]) {
+      const directAction = querySmart(DOM_ADAPTER.actions[actionType]);
+      if (directAction) {
+        return directAction.closest("button, [role='button'], a, input") || directAction;
+      }
+    }
+
     const candidates = Array.from(
       document.querySelectorAll("button, input[type='submit'], input[type='button'], a, div[role='button'], span[role='button'], [role='button']")
     ).filter(el => {
@@ -2643,7 +2910,6 @@
     if (startBtn && !isButtonDisabled(startBtn)) {
       isAutoStartClicking = true;
       console.log("[Step Solver] Start button detected on test page. Auto-clicking Start...");
-      showToast("Auto-starting test...");
       updateStatus("Starting...", "working", "START");
       await delay(400);
       simulateClick(startBtn);
@@ -2688,7 +2954,6 @@
       if (nextBtn && !isButtonDisabled(nextBtn)) {
         isAutoNextClicking = true;
         console.log("[Step Solver] Auto-Next (2s elapsed): Clicking 'Next' on Answer page...");
-        showToast("Auto-advancing to next question...");
         updateStatus("Advancing...", "working", "NEXT");
         simulateClick(nextBtn);
         await delay(1500);
@@ -2738,7 +3003,6 @@
 
     if (!isButtonDisabled(submitBtn)) {
       console.log("[Step Solver] Auto-Submit: Submitting selected answer...");
-      showToast("Auto-submitting answer...");
       simulateClick(submitBtn);
 
       // Continuous transition watcher to detect Answer page after submission
@@ -3039,7 +3303,6 @@
       if (key && !state.playedVideoKeys.has(key)) {
         state.playedVideoKeys.add(key);
         console.log(`%c[Step Solver]%c Auto-playing new YouTube video: ${key}`, "color:#3b82f6;font-weight:bold", "color:#fff");
-        showToast("Auto-playing video...");
       }
       playYouTubeIframe(iframe);
     }
@@ -3054,7 +3317,6 @@
       if (key && !state.playedVideoKeys.has(key)) {
         state.playedVideoKeys.add(key);
         console.log(`%c[Step Solver]%c Auto-playing new HTML5 video: ${key}`, "color:#3b82f6;font-weight:bold", "color:#fff");
-        showToast("Auto-playing video...");
       }
       if (video.paused && !video.ended) {
         playHTML5Video(video);
@@ -3283,12 +3545,16 @@
         console.log("%c[Step Solver]%c Currently on Answer/Feedback page. Skipping question search.", "color:#10b981;font-weight:bold", "color:#fff");
         hideAnswerBanner();
         updateStatus("Answer Page", "idle", "NEXT");
-        if (!isAutomated) {
-          showToast("Answer page detected. Click 'Next' to solve the next question.");
-        }
         if (state.autoSubmitEnabled) {
           handleAutoNext();
         }
+        return;
+      }
+
+      // THE ONE AND ONLY RULE: If page does NOT have a visible submit button, do NOT scan!
+      if (!hasVisibleSubmitButton()) {
+        console.log("%c[Step Solver]%c No submit button on current page. Switching to Idle mode.", "color:#6b7280;font-weight:bold", "color:#fff");
+        updateStatus("Idle", "idle", "IDLE");
         return;
       }
 
@@ -3332,9 +3598,6 @@
 
       // If page is between questions / transitioning / no question content yet, do not trigger
       if (!data.questionText && (!data.options || data.options.length === 0) && (!data.sentenceTokens || data.sentenceTokens.length === 0) && (!data.wordChoices || data.wordChoices.length === 0) && (!data.dropdowns || data.dropdowns.length === 0) && !data.domReferences?.writingArea) {
-        if (!isAutomated) {
-          showToast("No active question detected. Please ensure the question has loaded.");
-        }
         return;
       }
 
@@ -3349,9 +3612,6 @@
 
       if (!finalHasControls && data.questionText) {
         console.log("[Step Solver] Question prompt present, but options/controls not yet rendered in DOM. Waiting...");
-        if (!isAutomated) {
-          showToast("Question options are loading. Please wait a moment.");
-        }
         return;
       }
 
@@ -3429,7 +3689,6 @@
       // Notify user if automatic failover rotated keys
       if (solution && solution._keyRotated) {
         const failoverNotice = `⚡ Key #${solution._originalKeyIndex + 1} limit reached. Switched to Key #${solution._activeKeyIndex + 1} (${solution._modelUsed})`;
-        showToast(failoverNotice);
         showInfo(failoverNotice);
       }
 
@@ -3524,7 +3783,6 @@
         state.isProcessing = false;
         state.inFlightQuestionId = null;
         updateStatus("Answer Not Applied", "idle", "PAUSED");
-        showToast(resultMsg || "Answer could not be verified on page.");
         console.warn("[Gemini Live] Solver did not achieve verified click. Auto-submit blocked.");
         return;
       }
@@ -3535,7 +3793,6 @@
       state.inFlightQuestionId = null;
 
       updateStatus("Done", "idle", targetType.toUpperCase());
-      showToast(resultMsg);
 
       // Auto-Submit execution logic
       if (state.autoSubmitEnabled && isSuccess && effectiveClickedCount > 0) {
@@ -3556,10 +3813,8 @@
 
       const errLower = (err.message || "").toLowerCase();
       if (errLower.includes("context invalidated") || errLower.includes("extension context invalidated")) {
-        showToast("Extension reloaded. Please refresh this page (F5) to reconnect.");
         showInfo("🔄 Extension reloaded. Please refresh this tab (F5).");
       } else {
-        showToast(err.message);
         showInfo(`⚠️ ${err.message}`);
       }
 
@@ -3579,10 +3834,53 @@
   }
 
   // -------------------------------------------------------------
-  // 6. Auto-Watch Mutation Observer (Controlled & Token-Safe)
+  // 6. Auto-Watch Automation & SPA Route Gating (Submit-Button Gated)
   // -------------------------------------------------------------
   let autoWatchDebounce = null;
   let autoWatchInterval = null;
+  let spaRouteListenerInitialized = false;
+
+  function hasVisibleSubmitButton() {
+    const submitBtn = findActionElement("submit");
+    return Boolean(submitBtn && isElementVisible(submitBtn));
+  }
+
+  function runAutoSolveCycle() {
+    if (!state.isEnabled || !state.isAutoWatch) return;
+
+    // THE ONE AND ONLY RULE:
+    // If the page has a visible submit button -> only scan for the question.
+    // If not -> do NOT scan, switch to idle mode!
+    if (!hasVisibleSubmitButton()) {
+      if (isAnswerOrFeedbackPage()) {
+        hideAnswerBanner();
+        if (state.autoSubmitEnabled) {
+          handleAutoNext();
+        }
+        return;
+      }
+
+      // Home page, chapter navigation, course dashboard: strictly IDLE!
+      if (!state.isProcessing && state.statusText !== "Idle") {
+        updateStatus("Idle", "idle", "IDLE");
+      }
+      return;
+    }
+
+    if (state.isProcessing) return;
+
+    handleAutoPlayVideo();
+
+    const container = findActiveQuestionContainer();
+    if (!container) return;
+
+    const data = extractQuestionData(container);
+    const currentId = getQuestionIdentifier(container, data);
+
+    if (currentId && !state.solvedQuestionIds.has(currentId) && currentId !== state.lastSolvedQuestionId) {
+      triggerSolve(true);
+    }
+  }
 
   function startAutoWatcher() {
     if (state.observer) state.observer.disconnect();
@@ -3592,23 +3890,8 @@
       if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
       clearTimeout(autoWatchDebounce);
       autoWatchDebounce = setTimeout(() => {
-        if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
-        if (isAnswerOrFeedbackPage()) {
-          hideAnswerBanner();
-          if (state.autoSubmitEnabled) {
-            handleAutoNext();
-          }
-          return;
-        }
-        handleAutoPlayVideo();
-        const container = findActiveQuestionContainer();
-        if (!container) return;
-        const data = extractQuestionData(container);
-        const currentId = getQuestionIdentifier(container, data);
-        if (currentId && !state.solvedQuestionIds.has(currentId) && currentId !== state.lastSolvedQuestionId) {
-          triggerSolve(true);
-        }
-      }, 1200);
+        runAutoSolveCycle();
+      }, 500);
     });
 
     state.observer.observe(document.body, {
@@ -3616,24 +3899,13 @@
       subtree: true
     });
 
-    // Also check every 2 seconds to detect if user advanced to next question
+    // Safety polling interval (1500ms) to detect state changes across SPA views
     autoWatchInterval = setInterval(() => {
-      if (!state.isEnabled || !state.isAutoWatch || state.isProcessing) return;
-      if (isAnswerOrFeedbackPage()) {
-        hideAnswerBanner();
-        if (state.autoSubmitEnabled) {
-          handleAutoNext();
-        }
-        return;
-      }
-      const container = findActiveQuestionContainer();
-      if (!container) return;
-      const data = extractQuestionData(container);
-      const currentId = getQuestionIdentifier(container, data);
-      if (currentId && !state.solvedQuestionIds.has(currentId) && currentId !== state.lastSolvedQuestionId) {
-        triggerSolve(true);
-      }
-    }, 2000);
+      runAutoSolveCycle();
+    }, 1500);
+
+    // Initial cycle check
+    runAutoSolveCycle();
   }
 
   function stopAutoWatcher() {
@@ -3644,6 +3916,46 @@
     if (autoWatchInterval) {
       clearInterval(autoWatchInterval);
       autoWatchInterval = null;
+    }
+    if (autoWatchDebounce) {
+      clearTimeout(autoWatchDebounce);
+      autoWatchDebounce = null;
+    }
+  }
+
+  function setupSpaRouteListener() {
+    if (spaRouteListenerInitialized) return;
+    spaRouteListenerInitialized = true;
+
+    const onRouteChanged = () => {
+      state.inFlightQuestionId = null;
+      if (state.isAutoWatch) {
+        runAutoSolveCycle();
+      } else {
+        if (!hasVisibleSubmitButton() && !isAnswerOrFeedbackPage() && !state.isProcessing && state.statusText !== "Idle") {
+          updateStatus("Idle", "idle", "IDLE");
+        }
+      }
+    };
+
+    window.addEventListener("popstate", onRouteChanged);
+
+    const origPushState = history.pushState;
+    if (typeof origPushState === "function") {
+      history.pushState = function () {
+        const ret = origPushState.apply(this, arguments);
+        setTimeout(onRouteChanged, 150);
+        return ret;
+      };
+    }
+
+    const origReplaceState = history.replaceState;
+    if (typeof origReplaceState === "function") {
+      history.replaceState = function () {
+        const ret = origReplaceState.apply(this, arguments);
+        setTimeout(onRouteChanged, 150);
+        return ret;
+      };
     }
   }
 

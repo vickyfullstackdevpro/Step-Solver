@@ -664,21 +664,17 @@ Return ONLY a valid JSON object without markdown fences:
             }
         } catch (_) {}
 
-        const input = element.querySelector("input[type='radio'], input[type='checkbox']") ||
-            (element.parentElement ? element.parentElement.querySelector("input[type='radio'], input[type='checkbox']") : null);
+        // If element is inside a button, link, or label, target the interactive container directly!
+        // NEVER dispatch separate clicks to both a child element and its parent button (prevents duplicate clicks).
+        const clickableContainer = element.closest("button, [role='button'], [role='radio'], a, label");
+        const target = clickableContainer || element;
 
-        const clickableContainer = element.closest(
-            "button, [role='button'], [role='radio'], label, [class*='option' i], [class*='choice' i], [class*='card' i], [class*='item' i], [class*='chip' i], [class*='token' i], [class*='pill' i], [class*='answer' i], [class*='select' i], li"
-        );
+        const input = target.tagName === "INPUT"
+            ? target
+            : (target.querySelector("input[type='radio'], input[type='checkbox']") ||
+               (target.parentElement ? target.parentElement.querySelector("input[type='radio'], input[type='checkbox']") : null));
 
-        const targets = new Set([element]);
-        if (input) targets.add(input);
-        if (clickableContainer) targets.add(clickableContainer);
-        if (element.parentElement && element.parentElement !== document.body) {
-            targets.add(element.parentElement);
-        }
-
-        if (input) {
+        if (input && input !== target) {
             try {
                 input.checked = true;
                 input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -686,19 +682,59 @@ Return ONLY a valid JSON object without markdown fences:
             } catch (_) {}
         }
 
-        const clickEvents = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
-        targets.forEach(tgt => {
-            clickEvents.forEach(evtName => {
-                try {
-                    if (evtName.startsWith("pointer") && typeof PointerEvent !== "undefined") {
-                        tgt.dispatchEvent(new PointerEvent(evtName, { bubbles: true, cancelable: true, view: window, pointerId: 1, pointerType: "mouse", isPrimary: true }));
-                    } else {
-                        tgt.dispatchEvent(new MouseEvent(evtName, { bubbles: true, cancelable: true, view: window }));
-                    }
-                } catch (_) {}
-            });
-            try { tgt.click(); } catch (_) {}
+        // Calculate realistic center coordinates
+        let clientX = 0;
+        let clientY = 0;
+        try {
+            const rect = target.getBoundingClientRect();
+            clientX = Math.round(rect.left + Math.max(1, rect.width / 2));
+            clientY = Math.round(rect.top + Math.max(1, rect.height / 2));
+        } catch (_) {}
+
+        const eventInit = {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            view: window,
+            detail: 1,
+            clientX,
+            clientY,
+            screenX: (window.screenX || 0) + clientX,
+            screenY: (window.screenY || 0) + clientY,
+            button: 0,
+            buttons: 1
+        };
+
+        // Dispatch pointer and mouse down/up sequences for frameworks that require them
+        ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach(evtName => {
+            try {
+                if (evtName.startsWith("pointer") && typeof PointerEvent !== "undefined") {
+                    target.dispatchEvent(new PointerEvent(evtName, {
+                        ...eventInit,
+                        pointerId: 1,
+                        pointerType: "mouse",
+                        isPrimary: true
+                    }));
+                } else {
+                    target.dispatchEvent(new MouseEvent(evtName, eventInit));
+                }
+            } catch (_) {}
         });
+
+        // Fire EXACTLY ONE click event: Native target.click() if available, else synthetic click event
+        let clickSucceeded = false;
+        try {
+            if (typeof target.click === "function") {
+                target.click();
+                clickSucceeded = true;
+            }
+        } catch (_) {}
+
+        if (!clickSucceeded) {
+            try {
+                target.dispatchEvent(new MouseEvent("click", eventInit));
+            } catch (_) {}
+        }
     }
 
     function isElementVisible(el) {
@@ -1015,50 +1051,79 @@ Return ONLY a valid JSON object without markdown fences:
         if (hasClozeKeywords) return false;
 
         // CRITICAL: If visible radio buttons exist, this is an MCQ (e.g. sequence ordering ABCD / DCAB), NOT chip rearrange!
-        const hasRadioInputs = Array.from(document.querySelectorAll("input[type='radio']")).some(isElementVisible);
+        const hasRadioInputs = Array.from(document.querySelectorAll("input[type='radio'], input[type='checkbox'], [role='radio']")).some(isElementVisible);
         if (hasRadioInputs) return false;
 
-        // CRITICAL: "Fill in the blank" / "Choose the correct" questions are NEVER sentence rearrangements!
-        const isFillBlankOrChoose = (
-            bodyText.includes("fill in the blank") ||
-            bodyText.includes("fill in the blanks") ||
-            bodyText.includes("fill in the missing") ||
-            bodyText.includes("select the best answer") ||
-            bodyText.includes("choose the best") ||
-            bodyText.includes("choose the correct") ||
-            bodyText.includes("select the correct") ||
-            bodyText.includes("select the suitable") ||
-            bodyText.includes("choose the suitable") ||
-            bodyText.includes("best answer from the following")
-        );
+        // CRITICAL: Writing tasks are NEVER sentence rearrangements!
+        const hasWritingArea = Array.from(document.querySelectorAll("textarea:not(.gemini-input), [contenteditable='true']")).some(isElementVisible);
+        if (hasWritingArea && (bodyText.includes("write a") || bodyText.includes("word limit") || bodyText.includes("word count"))) {
+            return false;
+        }
 
+        // Structural Ground Truth for StepTest SPAs:
+        // "Word bank" section + Answer work zone ("Your sentence", min-h-[2.5rem], .rounded-card, data-testid='answer-zone')
+        const hasWordBankLabel = Array.from(document.querySelectorAll("div, span, p, label")).some(el => {
+            if (!isElementVisible(el) || isNavOrSystem(el)) return false;
+            const t = safeText(el).trim().toLowerCase();
+            return t === "word bank" || t.startsWith("word bank");
+        });
+
+        // NOTE: .border-line intentionally excluded — chip <button> elements on StepTest have class
+        // 'border border-line', which would cause the work zone selector to match chip buttons themselves.
+        // Also explicitly exclude .min-h-screen so Tailwind's page shell does not false-match.
+        const hasAnswerWorkZone = Array.from(document.querySelectorAll(
+            "[data-testid='answer-zone'], [data-testid*='answer'], div.flex.flex-wrap[class*='min-h-'], [class*='min-h-['], .answer-zone, [data-drop-zone]"
+        )).some(el => isElementVisible(el) && !el.matches(".min-h-screen, [class*='min-h-screen']"));
+
+        const hasYourSentenceLabel = bodyText.includes("your sentence") || bodyText.includes("tap chips below");
+
+        if (hasWordBankLabel && (hasAnswerWorkZone || hasYourSentenceLabel)) {
+            return true;
+        }
+
+        // SPECIFIC full-phrase rearrange keywords only — NEVER use standalone "rearrange"
+        // to avoid false positives on MCQs that contain the word "rearrange" in their content.
         const hasRearrangeKeywords = (
             bodyText.includes("rearrange the words or phrases") ||
             bodyText.includes("rearrange the phrases") ||
             bodyText.includes("rearrange the words") ||
-            bodyText.includes("rearrange words") ||
-            bodyText.includes("rearrange phrases") ||
+            bodyText.includes("rearrange the following") ||
             bodyText.includes("rearrange the sentence") ||
+            bodyText.includes("rearrange the statements") ||
+            bodyText.includes("rearrange to form") ||
+            bodyText.includes("rearrange words to form") ||
+            bodyText.includes("rearrange the given") ||
+            bodyText.includes("arrange the following statements") ||
             bodyText.includes("arrange the following sentences") ||
+            bodyText.includes("arrange the following words") ||
+            bodyText.includes("arrange the following phrases") ||
             bodyText.includes("arrange the sentences") ||
-            bodyText.includes("arrange sentences") ||
             bodyText.includes("arrange the words") ||
-            bodyText.includes("arrange the phrases") ||
+            bodyText.includes("arrange these sentences") ||
+            bodyText.includes("arrange these words") ||
+            bodyText.includes("increasing order of politeness") ||
+            bodyText.includes("decreasing order of politeness") ||
+            bodyText.includes("increasing order of formality") ||
+            bodyText.includes("decreasing order of formality") ||
+            bodyText.includes("order of politeness") ||
+            bodyText.includes("order of formality") ||
             bodyText.includes("form a logical sentence") ||
-            bodyText.includes("form a sentence")
+            bodyText.includes("form a sentence using") ||
+            bodyText.includes("form a sentence with") ||
+            bodyText.includes("form a sentence from") ||
+            bodyText.includes("form a sentence requesting") ||
+            bodyText.includes("tap chips below to build your answer")
         );
 
-        if (isFillBlankOrChoose && !hasRearrangeKeywords) {
-            return false;
-        }
-
-        if (hasRearrangeKeywords) return true;
+        // Keyword detected: must also have structural confirmation (work zone or word bank + tokens)
+        if (hasRearrangeKeywords && (hasAnswerWorkZone || hasYourSentenceLabel)) return true;
+        if (hasRearrangeKeywords && hasWordBankLabel) return true;
 
         const hasResetBtn = Array.from(document.querySelectorAll("button, a, input, div, span, [role='button']"))
             .some(b => isElementVisible(b) && !isNavOrSystem(b) && safeText(b).toLowerCase().startsWith("reset"));
 
         const hasSlotDashes = (bodyText.includes("——") || bodyText.includes("––") || bodyText.includes("— —")) && (bodyText.includes("“") || bodyText.includes("”"));
-        if (hasResetBtn && hasSlotDashes) {
+        if (hasResetBtn && (hasSlotDashes || hasAnswerWorkZone)) {
             return true;
         }
 
@@ -1076,7 +1141,22 @@ Return ONLY a valid JSON object without markdown fences:
             if (!txt || txt.length < 1 || txt.length > 450) return false;
             const lower = txt.toLowerCase();
             if (/^(reset|submit|next|replay|play|save|continue|grade|abc|record|speak|mic|listen)\b/i.test(lower)) return false;
+            
+            // Exclude chips placed inside the answer work area ("Your sentence")
+            const workZone = el.closest("[data-testid='answer-zone'], [data-drop-zone], .answer-zone, div.flex.flex-wrap[class*='min-h-'], [class*='min-h-[']");
+            if (workZone && !workZone.matches(".min-h-screen, [class*='min-h-screen']")) {
+                const wzText = safeText(workZone).toLowerCase();
+                if (wzText.includes("your sentence") && !wzText.includes("word bank")) return false;
+                if (workZone.matches("[data-testid='answer-zone'], [data-drop-zone], .answer-zone")) return false;
+            }
+            const parentCard = el.closest(".rounded-card, fieldset");
+            if (parentCard) {
+                const pcText = safeText(parentCard).toLowerCase();
+                if (pcText.includes("your sentence") && !pcText.includes("word bank")) return false;
+            }
+
             if (lower.startsWith("rearrange the words or phrases")) return false;
+            if (lower.startsWith("arrange the following statements")) return false;
             if (lower.startsWith("arrange the following sentences")) return false;
             if (lower.startsWith("form a logical sentence")) return false;
             if (lower.startsWith("if the video is not loading")) return false;
@@ -1093,15 +1173,48 @@ Return ONLY a valid JSON object without markdown fences:
             return !Array.from(el.querySelectorAll("*")).some(ch => isValidChip(ch));
         }
 
-        // Strategy 0: StepTest Rearrange Anchor to Reset Button
+        // Strategy 0: Direct "Word bank" section resolution (Ground Truth for StepTest Tailwind SPAs)
+        const wordBankLabels = Array.from(document.querySelectorAll("div, span, p, label")).filter(el => {
+            if (!isElementVisible(el) || isNavOrSystem(el)) return false;
+            const t = safeText(el).trim().toLowerCase();
+            return t === "word bank" || t.startsWith("word bank");
+        });
+        for (const wb of wordBankLabels) {
+            const parent = wb.closest(".space-y-1, .space-y-2, .space-y-4") || wb.parentElement;
+            const chipContainer = parent ? (parent.querySelector(".flex-wrap, .gap-2") || parent) : wb.nextElementSibling;
+            if (chipContainer) {
+                const chips = Array.from(chipContainer.querySelectorAll("button, .rounded-pill, [role='button']")).filter(isLeafChip);
+                if (chips.length >= 2) {
+                    chips.forEach(el => {
+                        if (!seen.has(el)) {
+                            seen.add(el);
+                            tokens.push({ element: el, index: tokens.length, text: safeText(el) });
+                        }
+                    });
+                    if (tokens.length >= 2) return tokens;
+                }
+            }
+        }
+
+        // Strategy 1: StepTest Rearrange Anchor to Boundary Button
         const allLabels = Array.from(document.querySelectorAll("*")).filter(el => isElementVisible(el) && !isNavOrSystem(el));
         const matchingAnchors = allLabels.filter(el => {
             const t = safeText(el).toLowerCase();
             return (
                 t.includes("rearrange the words or phrases") ||
+                t.includes("rearrange the words") ||
+                t.includes("rearrange the phrases") ||
+                t.includes("rearrange the sentence") ||
+                t.includes("rearrange") ||
+                t.includes("arrange the following statements") ||
                 t.includes("arrange the following sentences") ||
+                t.includes("arrange the following") ||
+                t.includes("increasing order") ||
+                t.includes("decreasing order") ||
+                t.includes("order of politeness") ||
+                t.includes("order of formality") ||
                 t.includes("form a logical sentence") ||
-                t.includes("rearrange the sentence")
+                t.includes("form a sentence")
             );
         });
 
@@ -1138,7 +1251,7 @@ Return ONLY a valid JSON object without markdown fences:
                         tokens.push({ element: el, index: tokens.length, text: t });
                     }
                 }
-                if (tokens.length >= 3) return tokens;
+                if (tokens.length >= 2) return tokens;
             }
         }
 
@@ -1220,7 +1333,7 @@ Return ONLY a valid JSON object without markdown fences:
         if (isRearrange) {
             sentenceTokens = findRearrangeTokens();
         }
-        const finalIsRearrange = isRearrange && sentenceTokens.length >= 3;
+        const finalIsRearrange = isRearrange && sentenceTokens.length >= 2;
 
         // 5. Writing Area Detection
         const writingSelectors = "textarea:not(.gemini-input), [contenteditable='true'], [contenteditable=''], [contenteditable], [role='textbox'], .ql-editor, .fr-element, .monaco-editor, .public-DraftEditor-content, div.editable";
@@ -1569,11 +1682,20 @@ Return ONLY a valid JSON object without markdown fences:
                             const txt = safeText(b).toLowerCase();
                             return txt.startsWith("reset");
                         });
-                        const hasPlacedChips = document.querySelectorAll("[class*='slot' i] [class*='chip' i], [class*='slot' i] span, .word-slot:not(:empty)").length > 0;
+
+                        const answerZone = document.querySelector(
+                            "[data-testid='answer-zone'], [data-drop-zone], .answer-zone, div.flex.flex-wrap[class*='min-h-']:not(.min-h-screen), [class*='min-h-[']"
+                        );
+                        const chipsInAnswerZone = answerZone ? Array.from(answerZone.querySelectorAll("button, .rounded-pill, [role='button']")).filter(isElementVisible) : [];
+
+                        const hasPlacedChips = chipsInAnswerZone.length > 0 || (
+                            document.querySelectorAll("[class*='slot' i] [class*='chip' i], [class*='slot' i] span, .word-slot:not(:empty)").length > 0
+                        );
                         if (resetBtn && hasPlacedChips) {
                             console.log("[StepTest] Resetting rearrange slots to ensure clean insertion...");
                             simulateClick(resetBtn);
-                            await wait(350);
+                            await wait(400);
+                            current.sentenceTokens = findRearrangeTokens();
                         }
 
                         const solution = await askGemini(
@@ -1789,8 +1911,18 @@ Return ONLY a valid JSON object without markdown fences:
 
                             // Sequentially click the chips in order
                             for (const chip of orderedChips) {
-                                simulateClick(chip.element);
-                                await wait(300);
+                                let targetEl = chip.element;
+                                if (!targetEl || !targetEl.isConnected || !isElementVisible(targetEl)) {
+                                    const liveTokens = findRearrangeTokens();
+                                    const match = liveTokens.find(t => normalizeTokenText(t.text) === normalizeTokenText(chip.text));
+                                    if (match && match.element && match.element.isConnected) {
+                                        targetEl = match.element;
+                                    }
+                                }
+                                if (targetEl && isElementVisible(targetEl)) {
+                                    simulateClick(targetEl);
+                                    await wait(350);
+                                }
                             }
 
                             const resultSentence = solution.reconstructed_sentence || orderedChips.map(c => c.text).join(" ");

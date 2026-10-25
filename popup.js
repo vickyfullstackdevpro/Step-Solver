@@ -61,9 +61,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   const btnAddText = document.getElementById("btn-add-text");
   const apiStatusMsg = document.getElementById("api-status-msg");
   const keysListContainer = document.getElementById("keys-list");
-  const activeModelName = document.getElementById("active-model-name");
-  const speedSlider = document.getElementById("speed-slider");
-  const speedValue = document.getElementById("speed-value");
   const btnRefreshKeys = document.getElementById("btn-refresh-keys");
   const refreshIcon = document.getElementById("refresh-icon");
   const refreshBtnText = document.getElementById("refresh-btn-text");
@@ -1271,16 +1268,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  if (stored.typingDelayMs !== undefined && speedSlider && speedValue) {
-    speedSlider.value = stored.typingDelayMs;
-    speedValue.innerText = `${stored.typingDelayMs} ms`;
-  }
-  if (speedSlider) {
-    speedSlider.addEventListener("input", (e) => {
-      if (speedValue) speedValue.innerText = `${e.target.value} ms`;
-      chrome.storage.local.set({ typingDelayMs: parseInt(e.target.value, 10) });
-    });
-  }
 
   const devPortfolioLink = document.getElementById("dev-portfolio-link");
   if (devPortfolioLink) {
@@ -1435,13 +1422,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
 
-    if (activeModelName) {
-      if (keys.length > 0 && keys[activeIndex]) {
-        activeModelName.innerText = keys[activeIndex].model || "Auto-Selected";
-      } else {
-        activeModelName.innerText = "None (Add Key)";
-      }
-    }
 
     if (keys.length === 0) {
       if (btnRefreshKeys) btnRefreshKeys.style.display = "none";
